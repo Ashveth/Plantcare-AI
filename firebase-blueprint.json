@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user-specific information and settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique user ID from Firebase Auth" },
+        "email": { "type": "string", "format": "email", "description": "User's email address" },
+        "displayName": { "type": "string", "description": "User's display name" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Plant": {
+      "title": "Plant Profile",
+      "description": "Detailed information about a user's plant.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique plant ID" },
+        "ownerUid": { "type": "string", "description": "UID of the user who owns this plant" },
+        "name": { "type": "string", "description": "Name of the plant" },
+        "type": { "type": "string", "enum": ["Flowering", "Indoor", "Outdoor", "Medicinal", "Succulent"], "description": "Type of plant" },
+        "height": { "type": "number", "description": "Current height in cm" },
+        "age": { "type": "number", "description": "Age in days" },
+        "lastWatered": { "type": "string", "format": "date-time", "description": "ISO 8601 date of last watering" },
+        "wateringFrequency": { "type": "number", "description": "Watering frequency in days" },
+        "healthStatus": { "type": "string", "enum": ["Good", "Moderate", "Poor"], "description": "Current health status" },
+        "notes": { "type": "string", "description": "User notes about the plant" },
+        "imageUrl": { "type": "string", "description": "URL to the plant's image" },
+        "lastFertilized": { "type": "string", "format": "date-time", "description": "ISO 8601 date of last fertilization" }
+      },
+      "required": ["ownerUid", "name", "type", "height", "age", "lastWatered", "wateringFrequency", "healthStatus"]
+    },
+    "GrowthLog": {
+      "title": "Growth Log",
+      "description": "Historical height data for tracking growth over time.",
+      "type": "object",
+      "properties": {
+        "plantId": { "type": "string", "description": "ID of the plant" },
+        "height": { "type": "number", "description": "Height in cm at the time of log" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "ISO 8601 date of the log" }
+      },
+      "required": ["plantId", "height", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/plants/{plantId}": {
+      "schema": "Plant",
+      "description": "Plant profile documents"
+    },
+    "/plants/{plantId}/growthLogs/{logId}": {
+      "schema": "GrowthLog",
+      "description": "Growth history for a specific plant"
+    }
+  }
+}

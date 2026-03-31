@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //
+    // Collection: plants
+    // Document ID: {plantId}
+    // Fields:
+    //   - ownerUid: string (required)
+    //   - name: string (required, size < 100)
+    //   - type: string (required, enum)
+    //   - height: number (required, > 0)
+    //   - age: number (required, >= 0)
+    //   - lastWatered: string (required, ISO 8601)
+    //   - wateringFrequency: number (required, > 0)
+    //   - healthStatus: string (required, enum)
+    //   - notes: string (optional, size < 1000)
+    //   - imageUrl: string (optional, URL format)
+    //   - lastFertilized: string (optional, ISO 8601)
+    //
+    // Collection: plants/{plantId}/growthLogs
+    // Document ID: {logId}
+    // Fields:
+    //   - plantId: string (required)
+    //   - height: number (required, > 0)
+    //   - timestamp: string (required, ISO 8601)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.ownerUid;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return data.uid == request.auth.uid &&
+             data.email is string && isValidEmail(data.email);
+    }
+
+    function isValidPlant(data) {
+      return data.ownerUid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.type in ['Flowering', 'Indoor', 'Outdoor', 'Medicinal', 'Succulent'] &&
+             data.height is number && data.height > 0 &&
+             data.age is number && data.age >= 0 &&
+             isValidDateString(data.lastWatered) &&
+             data.wateringFrequency is number && data.wateringFrequency > 0 &&
+             data.healthStatus in ['Good', 'Moderate', 'Poor'];
+    }
+
+    function isValidGrowthLog(data) {
+      return data.plantId is string &&
+             data.height is number && data.height > 0 &&
+             isValidDateString(data.timestamp);
+    }
+
+    // Rules
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && isValidUser(request.resource.data);
+      allow update: if isOwner(uid) && isValidUser(request.resource.data);
+    }
+
+    match /plants/{plantId} {
+      allow read: if isDocOwner() || (isAuthenticated() && request.resource.data.ownerUid == request.auth.uid);
+      allow create: if isAuthenticated() && isValidPlant(request.resource.data);
+      allow update: if isDocOwner() && isValidPlant(request.resource.data);
+      allow delete: if isDocOwner();
+
+      match /growthLogs/{logId} {
+        allow read: if isAuthenticated() && get(/databases/$(database)/documents/plants/$(plantId)).data.ownerUid == request.auth.uid;
+        allow create: if isAuthenticated() && get(/databases/$(database)/documents/plants/$(plantId)).data.ownerUid == request.auth.uid && isValidGrowthLog(request.resource.data);
+        allow update, delete: if isAuthenticated() && get(/databases/$(database)/documents/plants/$(plantId)).data.ownerUid == request.auth.uid;
+      }
+    }
+  }
+}

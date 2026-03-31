@@ -1,0 +1,5 @@
+{
+  "name": "PlantCare AI",
+  "description": "A comprehensive plant management app with AI-powered health monitoring, watering reminders, and growth tracking.",
+  "requestFramePermissions": ["camera"]
+}
