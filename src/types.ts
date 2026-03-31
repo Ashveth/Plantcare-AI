@@ -15,7 +15,6 @@ export interface Plant {
   notes: string;
   imageUrl: string;
   lastFertilized: string; // ISO 8601
-  lastChecked: string; // ISO 8601
 }
 
 export interface GrowthLog {

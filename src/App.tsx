@@ -212,12 +212,7 @@ export default function App() {
 
   useEffect(() => {
     if (isDemo) {
-      setPlants(INITIAL_PLANTS.map((p, i) => ({ 
-        ...p, 
-        id: `demo-${i}`, 
-        ownerUid: 'demo-user',
-        lastChecked: new Date().toISOString() 
-      } as Plant)));
+      setPlants(INITIAL_PLANTS.map((p, i) => ({ ...p, id: `demo-${i}`, ownerUid: 'demo-user' } as Plant)));
       setIsLoading(false);
       return;
     }
@@ -241,8 +236,7 @@ export default function App() {
               ...p,
               ownerUid: user.uid,
               lastWatered: new Date().toISOString(),
-              lastFertilized: new Date().toISOString(),
-              lastChecked: new Date().toISOString()
+              lastFertilized: new Date().toISOString()
             })
           );
           await Promise.all(promises);
@@ -346,54 +340,17 @@ export default function App() {
     }
   };
 
-  const handleViewDetails = async (plant: Plant) => {
-    const now = new Date().toISOString();
-    if (isDemo) {
-      setPlants(prev => prev.map(p => p.id === plant.id ? { ...p, lastChecked: now } : p));
-    } else {
-      try {
-        await updateDoc(doc(db, 'plants', plant.id), {
-          lastChecked: now
-        });
-      } catch (err) {
-        console.error("Error updating lastChecked:", err);
-      }
-    }
-    setSelectedPlant({ ...plant, lastChecked: now });
-  };
-  
-  const handleAddGrowthLog = async (id: string, height: number) => {
-    if (isDemo) {
-      setPlants(prev => prev.map(p => p.id === id ? { ...p, height } : p));
-      toast.success('Growth log added! 📈');
-      return;
-    }
-    try {
-      await updateDoc(doc(db, 'plants', id), { height });
-      await addDoc(collection(db, `plants/${id}/growthLogs`), {
-        plantId: id,
-        height,
-        timestamp: new Date().toISOString()
-      });
-      toast.success('Growth log added successfully! 📈');
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to add growth log.');
-    }
-  };
-
   const handleAddPlant = async (newPlant: Omit<Plant, 'id' | 'ownerUid'>) => {
-    const plantWithChecked = { ...newPlant, lastChecked: new Date().toISOString() };
     if (isDemo) {
       const demoId = `demo-${Date.now()}`;
-      setPlants(prev => [...prev, { ...plantWithChecked, id: demoId, ownerUid: 'demo-user' } as Plant]);
+      setPlants(prev => [...prev, { ...newPlant, id: demoId, ownerUid: 'demo-user' } as Plant]);
       toast.success('New plant added to your garden! 🌿');
       return;
     }
     if (!user) return;
     try {
       await addDoc(collection(db, 'plants'), {
-        ...plantWithChecked,
+        ...newPlant,
         ownerUid: user.uid
       });
       toast.success('New plant added to your garden! 🌿');
@@ -624,9 +581,8 @@ export default function App() {
                 plant={plant} 
                 onWater={handleWater}
                 onFertilize={handleFertilize}
-                onEdit={handleViewDetails}
+                onEdit={(p) => setSelectedPlant(p)}
                 onDelete={handleDelete}
-                onAddGrowthLog={handleAddGrowthLog}
               />
             ))}
           </div>

@@ -56,8 +56,7 @@ export const AddPlantModal: React.FC<AddPlantModalProps> = ({ onClose, onAdd }) 
     onAdd({
       ...formData,
       lastWatered: new Date().toISOString(),
-      lastFertilized: new Date().toISOString(),
-      lastChecked: new Date().toISOString()
+      lastFertilized: new Date().toISOString()
     });
     onClose();
   };

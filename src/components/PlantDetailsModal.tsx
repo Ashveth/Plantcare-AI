@@ -5,10 +5,9 @@ import { GrowthChart } from './GrowthChart';
 import { ConfirmationModal } from './ConfirmationModal';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
-import { format, addDays, isPast, isValid } from 'date-fns';
+import { format, addDays, isPast } from 'date-fns';
 import { identifyPlantFromImage, getPlantCareTips } from '../services/gemini';
 import { toast } from 'sonner';
-import { safeFormat, safeNewDate } from '../lib/dateUtils';
 
 interface PlantDetailsModalProps {
   plant: Plant;
@@ -30,10 +29,10 @@ export const PlantDetailsModal: React.FC<PlantDetailsModalProps> = ({ plant, onC
   const [isLoadingTips, setIsLoadingTips] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const nextFertilizing = addDays(safeNewDate(plant.lastFertilized), plant.fertilizationFrequency);
+  const nextFertilizing = addDays(new Date(plant.lastFertilized), plant.fertilizationFrequency);
   const needsFertilizer = isPast(nextFertilizing);
 
-  const nextWatering = addDays(safeNewDate(plant.lastWatered), plant.wateringFrequency);
+  const nextWatering = addDays(new Date(plant.lastWatered), plant.wateringFrequency);
   const needsWater = isPast(nextWatering);
 
   useEffect(() => {
@@ -311,7 +310,7 @@ export const PlantDetailsModal: React.FC<PlantDetailsModalProps> = ({ plant, onC
               </div>
               <p className={`text-sm mb-6 ${needsWater ? 'text-blue-100' : 'text-blue-800'}`}>
                 Needs water every <strong>{plant.wateringFrequency} days</strong>. 
-                Last watered on {safeFormat(plant.lastWatered, 'MMMM do')}.
+                Last watered on {format(new Date(plant.lastWatered), 'MMMM do')}.
               </p>
               <button 
                 onClick={() => setShowWaterConfirm(true)}
@@ -341,7 +340,7 @@ export const PlantDetailsModal: React.FC<PlantDetailsModalProps> = ({ plant, onC
               </div>
               <p className={`text-sm mb-6 ${needsFertilizer ? 'text-purple-100' : 'text-purple-800'}`}>
                 Feed every <strong>{plant.fertilizationFrequency} days</strong>. 
-                Last fed on {safeFormat(plant.lastFertilized, 'MMMM do')}.
+                Last fed on {format(new Date(plant.lastFertilized), 'MMMM do')}.
               </p>
               <button 
                 onClick={() => setShowFertilizeConfirm(true)}

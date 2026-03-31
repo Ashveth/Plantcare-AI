@@ -27,7 +27,6 @@ service cloud.firestore {
     //   - notes: string (optional, size < 1000)
     //   - imageUrl: string (optional, URL format)
     //   - lastFertilized: string (optional, ISO 8601)
-    //   - lastChecked: string (required, ISO 8601)
     //
     // Collection: plants/{plantId}/growthLogs
     // Document ID: {logId}
@@ -74,10 +73,7 @@ service cloud.firestore {
              isValidDateString(data.lastWatered) &&
              data.wateringFrequency is number && data.wateringFrequency > 0 &&
              data.fertilizationFrequency is number && data.fertilizationFrequency > 0 &&
-             (!('lastFertilized' in data) || isValidDateString(data.lastFertilized)) &&
-             (!('lastChecked' in data) || isValidDateString(data.lastChecked)) &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
-             (!('imageUrl' in data) || (data.imageUrl is string)) &&
+             isValidDateString(data.lastFertilized) &&
              data.healthStatus in ['Good', 'Moderate', 'Poor'];
     }
 
@@ -95,7 +91,7 @@ service cloud.firestore {
     }
 
     match /plants/{plantId} {
-      allow read: if isDocOwner();
+      allow read: if isDocOwner() || (isAuthenticated() && request.resource.data.ownerUid == request.auth.uid);
       allow create: if isAuthenticated() && isValidPlant(request.resource.data);
       allow update: if isDocOwner() && isValidPlant(request.resource.data);
       allow delete: if isDocOwner();

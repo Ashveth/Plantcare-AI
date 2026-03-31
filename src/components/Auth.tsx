@@ -31,7 +31,7 @@ export const Auth: React.FC<{
       case 'auth/invalid-credential':
         return 'Invalid email or password. Please try again.';
       case 'auth/operation-not-allowed':
-        return 'This sign-in method is currently disabled. If you are the developer, please enable it in the Firebase Console (Authentication > Sign-in method).';
+        return 'This sign-in method is currently disabled.';
       case 'auth/popup-blocked':
         return 'Oops! The sign-in window was blocked. Please enable popups in your browser settings to continue.';
       case 'auth/popup-closed-by-user':
@@ -68,9 +68,6 @@ export const Auth: React.FC<{
       onAuth();
     } catch (err: any) {
       console.error("Auth Error:", err);
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-by-user') {
-        return;
-      }
       const message = getErrorMessage(err.code);
       setError(message);
       toast.error(message);
@@ -88,9 +85,6 @@ export const Auth: React.FC<{
       onAuth();
     } catch (err: any) {
       console.error("Google Auth Error:", err);
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-by-user') {
-        return;
-      }
       const message = getErrorMessage(err.code);
       setError(message);
       toast.error(message);
@@ -168,7 +162,7 @@ export const Auth: React.FC<{
 
   return (
     <div className="min-h-screen bg-emerald-50 flex items-center justify-center p-4">
-      <div className="bg-white p-8 rounded-[40px] shadow-xl w-full max-w-md border border-emerald-100 animate-in fade-in zoom-in duration-300">
+      <div className="bg-white p-8 rounded-[40px] shadow-xl w-full max-w-md border border-emerald-100">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 bg-emerald-600 rounded-3xl flex items-center justify-center text-white mb-4 shadow-lg">
             <Leaf size={32} />
@@ -177,30 +171,14 @@ export const Auth: React.FC<{
           <p className="text-gray-500 mt-2">Your smart plant companion</p>
         </div>
 
-        {/* Tabs */}
-        <div className="flex p-1 bg-gray-100 rounded-2xl mb-8">
-          <button 
-            onClick={() => { setIsLogin(true); setError(''); }}
-            className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${isLogin ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Sign In
-          </button>
-          <button 
-            onClick={() => { setIsLogin(false); setError(''); }}
-            className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${!isLogin ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Create Account
-          </button>
-        </div>
-
         <form onSubmit={handleAuth} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
             <input 
               type="email" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-gray-900 focus:ring-2 focus:ring-emerald-500 transition-all"
+              className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-gray-900 focus:ring-2 focus:ring-emerald-500"
               placeholder="hello@example.com"
               required
               disabled={isLoading}
@@ -212,7 +190,7 @@ export const Auth: React.FC<{
               type="password" 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-gray-900 focus:ring-2 focus:ring-emerald-500 transition-all"
+              className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-gray-900 focus:ring-2 focus:ring-emerald-500"
               placeholder="••••••••"
               required
               disabled={isLoading}
@@ -226,7 +204,7 @@ export const Auth: React.FC<{
                 type="password" 
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-gray-900 focus:ring-2 focus:ring-emerald-500 transition-all"
+                className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-gray-900 focus:ring-2 focus:ring-emerald-500"
                 placeholder="••••••••"
                 required
                 disabled={isLoading}
@@ -239,7 +217,7 @@ export const Auth: React.FC<{
           <button 
             type="submit"
             disabled={isLoading}
-            className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-semibold hover:bg-emerald-700 transition-colors shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {isLoading ? (
               <Loader2 size={20} className="animate-spin" />
@@ -252,9 +230,9 @@ export const Auth: React.FC<{
           </button>
         </form>
 
-        <div className="mt-8 flex items-center gap-4">
+        <div className="mt-6 flex items-center gap-4">
           <div className="flex-1 h-px bg-gray-100"></div>
-          <span className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">Social Login</span>
+          <span className="text-gray-400 text-sm">OR</span>
           <div className="flex-1 h-px bg-gray-100"></div>
         </div>
 
@@ -262,7 +240,7 @@ export const Auth: React.FC<{
           <button 
             onClick={handleGoogle}
             disabled={isLoading}
-            className="w-full bg-white border border-gray-100 text-gray-700 py-3 rounded-2xl font-bold hover:bg-gray-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50 shadow-sm"
+            className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-2xl font-semibold hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {isLoading ? (
               <Loader2 size={20} className="animate-spin" />
@@ -277,19 +255,32 @@ export const Auth: React.FC<{
           <button 
             onClick={() => setIsGuestSetup(true)}
             disabled={isLoading}
-            className="w-full bg-emerald-50 text-emerald-700 py-3 rounded-2xl font-bold hover:bg-emerald-100 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full bg-emerald-50 text-emerald-700 py-3 rounded-2xl font-semibold hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            Create Guest Account
+            Create Guest Account (No Login)
           </button>
           
           <button 
             onClick={() => onDemo()}
             disabled={isLoading}
-            className="w-full text-gray-400 py-2 text-[10px] font-bold uppercase tracking-widest hover:text-emerald-600 transition-colors"
+            className="w-full text-gray-400 py-2 text-xs font-medium hover:text-emerald-600 transition-colors"
           >
-            Skip to Quick Demo
+            Or skip to Quick Demo
           </button>
         </div>
+
+        <p className="mt-8 text-center text-gray-500 text-sm">
+          {isLogin ? "Don't have an account?" : "Already have an account?"}
+          <button 
+            onClick={() => {
+              setIsLogin(!isLogin);
+              setError('');
+            }}
+            className="ml-2 text-emerald-600 font-semibold hover:underline"
+          >
+            {isLogin ? 'Sign Up' : 'Sign In'}
+          </button>
+        </p>
       </div>
     </div>
   );
