@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Droplets, Sprout, Calendar, TrendingUp, Heart, Save, Loader2, Camera, Trash2, AlertTriangle } from 'lucide-react';
+import { X, Droplets, Sprout, Calendar, TrendingUp, Heart, Save, Loader2, Camera, Trash2, AlertTriangle, FlaskConical } from 'lucide-react';
 import { Plant, GrowthLog, PlantType } from '../types';
 import { GrowthChart } from './GrowthChart';
+import { ConfirmationModal } from './ConfirmationModal';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
-import { format } from 'date-fns';
-import { identifyPlantFromImage } from '../services/gemini';
+import { format, addDays, isPast, isValid } from 'date-fns';
+import { identifyPlantFromImage, getPlantCareTips } from '../services/gemini';
 import { toast } from 'sonner';
+import { safeFormat, safeNewDate } from '../lib/dateUtils';
 
 interface PlantDetailsModalProps {
   plant: Plant;
@@ -20,7 +22,19 @@ export const PlantDetailsModal: React.FC<PlantDetailsModalProps> = ({ plant, onC
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isFertilizing, setIsFertilizing] = useState(false);
+  const [isWatering, setIsWatering] = useState(false);
+  const [showWaterConfirm, setShowWaterConfirm] = useState(false);
+  const [showFertilizeConfirm, setShowFertilizeConfirm] = useState(false);
+  const [careTips, setCareTips] = useState<string[]>([]);
+  const [isLoadingTips, setIsLoadingTips] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const nextFertilizing = addDays(safeNewDate(plant.lastFertilized), plant.fertilizationFrequency);
+  const needsFertilizer = isPast(nextFertilizing);
+
+  const nextWatering = addDays(safeNewDate(plant.lastWatered), plant.wateringFrequency);
+  const needsWater = isPast(nextWatering);
 
   useEffect(() => {
     const q = query(collection(db, `plants/${plant.id}/growthLogs`));
@@ -29,6 +43,21 @@ export const PlantDetailsModal: React.FC<PlantDetailsModalProps> = ({ plant, onC
     });
     return unsubscribe;
   }, [plant.id]);
+
+  useEffect(() => {
+    const fetchTips = async () => {
+      setIsLoadingTips(true);
+      try {
+        const tips = await getPlantCareTips(plant.name, plant.type);
+        setCareTips(tips);
+      } catch (err) {
+        console.error("Error fetching care tips:", err);
+      } finally {
+        setIsLoadingTips(false);
+      }
+    };
+    fetchTips();
+  }, [plant.name, plant.type]);
 
   const handleImageUpdate = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -170,6 +199,32 @@ export const PlantDetailsModal: React.FC<PlantDetailsModalProps> = ({ plant, onC
               </p>
             </div>
 
+            <div className="mt-8 space-y-4">
+              <h4 className="font-bold text-gray-900 flex items-center gap-2">
+                <Sprout size={20} className="text-emerald-600" />
+                Expert Care Tips
+              </h4>
+              <div className="bg-emerald-50/50 rounded-3xl p-6 border border-emerald-100">
+                {isLoadingTips ? (
+                  <div className="flex flex-col items-center justify-center py-4 gap-2">
+                    <Loader2 className="text-emerald-600 animate-spin" size={24} />
+                    <p className="text-xs text-emerald-700 font-medium">Consulting PlantCare AI...</p>
+                  </div>
+                ) : careTips.length > 0 ? (
+                  <ul className="space-y-3">
+                    {careTips.map((tip, index) => (
+                      <li key={index} className="flex gap-3 text-sm text-emerald-900 leading-relaxed">
+                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-1.5 shrink-0" />
+                        {tip}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-emerald-700 italic">No care tips available right now.</p>
+                )}
+              </div>
+            </div>
+
             <div className="mt-10 pt-8 border-t border-gray-100">
               {!showDeleteConfirm ? (
                 <button 
@@ -242,19 +297,116 @@ export const PlantDetailsModal: React.FC<PlantDetailsModalProps> = ({ plant, onC
               </div>
             </div>
 
-            <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100">
-              <h4 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
-                <Droplets size={20} className="text-blue-600" />
-                Watering Schedule
-              </h4>
-              <p className="text-blue-800 text-sm">
-                This plant needs water every <strong>{plant.wateringFrequency} days</strong>. 
-                Last watered on {format(new Date(plant.lastWatered), 'MMMM do')}.
+            <div className={`p-6 rounded-3xl border transition-colors ${needsWater ? 'bg-blue-600 border-blue-700' : 'bg-blue-50 border-blue-100'}`}>
+              <div className="flex justify-between items-start mb-4">
+                <h4 className={`font-bold flex items-center gap-2 ${needsWater ? 'text-white' : 'text-blue-900'}`}>
+                  <Droplets size={20} className={needsWater ? 'text-white' : 'text-blue-600'} />
+                  Watering Schedule
+                </h4>
+                {needsWater && (
+                  <span className="bg-white/20 text-white text-[10px] font-bold uppercase px-2 py-1 rounded-lg backdrop-blur-sm animate-pulse">
+                    Thirsty
+                  </span>
+                )}
+              </div>
+              <p className={`text-sm mb-6 ${needsWater ? 'text-blue-100' : 'text-blue-800'}`}>
+                Needs water every <strong>{plant.wateringFrequency} days</strong>. 
+                Last watered on {safeFormat(plant.lastWatered, 'MMMM do')}.
               </p>
+              <button 
+                onClick={() => setShowWaterConfirm(true)}
+                disabled={isWatering}
+                className={`w-full py-3 rounded-2xl font-bold transition-all flex items-center justify-center gap-2 ${
+                  needsWater 
+                    ? 'bg-white text-blue-600 hover:bg-blue-50 shadow-lg' 
+                    : 'bg-blue-200 text-blue-800 hover:bg-blue-300'
+                }`}
+              >
+                {isWatering ? <Loader2 size={20} className="animate-spin" /> : <Droplets size={20} />}
+                {needsWater ? 'Water Now' : 'Mark as Watered'}
+              </button>
+            </div>
+
+            <div className={`p-6 rounded-3xl border transition-colors ${needsFertilizer ? 'bg-purple-600 border-purple-700' : 'bg-purple-50 border-purple-100'}`}>
+              <div className="flex justify-between items-start mb-4">
+                <h4 className={`font-bold flex items-center gap-2 ${needsFertilizer ? 'text-white' : 'text-purple-900'}`}>
+                  <FlaskConical size={20} className={needsFertilizer ? 'text-white' : 'text-purple-600'} />
+                  Fertilization Schedule
+                </h4>
+                {needsFertilizer && (
+                  <span className="bg-white/20 text-white text-[10px] font-bold uppercase px-2 py-1 rounded-lg backdrop-blur-sm animate-pulse">
+                    Due Now
+                  </span>
+                )}
+              </div>
+              <p className={`text-sm mb-6 ${needsFertilizer ? 'text-purple-100' : 'text-purple-800'}`}>
+                Feed every <strong>{plant.fertilizationFrequency} days</strong>. 
+                Last fed on {safeFormat(plant.lastFertilized, 'MMMM do')}.
+              </p>
+              <button 
+                onClick={() => setShowFertilizeConfirm(true)}
+                disabled={isFertilizing}
+                className={`w-full py-3 rounded-2xl font-bold transition-all flex items-center justify-center gap-2 ${
+                  needsFertilizer 
+                    ? 'bg-white text-purple-600 hover:bg-purple-50 shadow-lg' 
+                    : 'bg-purple-200 text-purple-800 hover:bg-purple-300'
+                }`}
+              >
+                {isFertilizing ? <Loader2 size={20} className="animate-spin" /> : <FlaskConical size={20} />}
+                {needsFertilizer ? 'Fertilize Now' : 'Mark as Fed'}
+              </button>
             </div>
           </div>
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={showWaterConfirm}
+        type="water"
+        title="Confirm Watering"
+        message={`Are you sure you want to water ${plant.name}?`}
+        confirmText="Water Now"
+        onConfirm={async () => {
+          setShowWaterConfirm(false);
+          setIsWatering(true);
+          try {
+            await updateDoc(doc(db, 'plants', plant.id), {
+              lastWatered: new Date().toISOString()
+            });
+            toast.success(`${plant.name} watered! 💧`);
+          } catch (err) {
+            console.error(err);
+            toast.error('Failed to update watering status.');
+          } finally {
+            setIsWatering(false);
+          }
+        }}
+        onCancel={() => setShowWaterConfirm(false)}
+      />
+
+      <ConfirmationModal
+        isOpen={showFertilizeConfirm}
+        type="fertilize"
+        title="Confirm Fertilization"
+        message={`Are you sure you want to fertilize ${plant.name}?`}
+        confirmText="Feed Now"
+        onConfirm={async () => {
+          setShowFertilizeConfirm(false);
+          setIsFertilizing(true);
+          try {
+            await updateDoc(doc(db, 'plants', plant.id), {
+              lastFertilized: new Date().toISOString()
+            });
+            toast.success(`${plant.name} has been fed! ✨`);
+          } catch (err) {
+            console.error(err);
+            toast.error('Failed to update fertilization status.');
+          } finally {
+            setIsFertilizing(false);
+          }
+        }}
+        onCancel={() => setShowFertilizeConfirm(false)}
+      />
     </div>
   );
 };

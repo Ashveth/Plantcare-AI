@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
@@ -11,6 +11,8 @@ export async function getPlantFeedback(plantData: any) {
   Age: ${plantData.age} days
   Last Watered: ${plantData.lastWatered}
   Watering Frequency: Every ${plantData.wateringFrequency} days
+  Last Fertilized: ${plantData.lastFertilized}
+  Fertilization Frequency: Every ${plantData.fertilizationFrequency} days
   Health: ${plantData.healthStatus}
   
   Example: "Your Rose plant is growing well! Keep up the good work." or "Your Aloe Vera may need less water."`;
@@ -65,5 +67,41 @@ export async function identifyPlantFromImage(base64Image: string) {
   } catch (error) {
     console.error("Gemini Identification Error:", error);
     return null;
+  }
+}
+
+export async function getPlantCareTips(plantName: string, plantType: string) {
+  const model = "gemini-3-flash-preview";
+  const prompt = `Provide 3-4 concise, professional care tips for a ${plantName} (${plantType} plant). 
+  Focus on:
+  1. Light requirements
+  2. Watering needs
+  3. Soil/Fertilizer
+  4. Common issues to watch for`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.STRING,
+          },
+        },
+      }
+    });
+    
+    const result = JSON.parse(response.text || "[]");
+    return result as string[];
+  } catch (error) {
+    console.error("Gemini Care Tips Error:", error);
+    return [
+      "Ensure the plant gets adequate light for its type.",
+      "Water consistently but avoid overwatering.",
+      "Check for pests or yellowing leaves regularly."
+    ];
   }
 }

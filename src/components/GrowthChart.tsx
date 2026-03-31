@@ -1,7 +1,7 @@
 import React from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { GrowthLog } from '../types';
-import { format } from 'date-fns';
+import { safeFormat, safeNewDate } from '../lib/dateUtils';
 
 interface GrowthChartProps {
   logs: GrowthLog[];
@@ -9,9 +9,9 @@ interface GrowthChartProps {
 
 export const GrowthChart: React.FC<GrowthChartProps> = ({ logs }) => {
   const data = logs
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    .sort((a, b) => safeNewDate(a.timestamp).getTime() - safeNewDate(b.timestamp).getTime())
     .map(log => ({
-      date: format(new Date(log.timestamp), 'MMM d'),
+      date: safeFormat(log.timestamp, 'MMM d'),
       height: log.height
     }));
 

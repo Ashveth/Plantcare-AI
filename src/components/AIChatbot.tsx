@@ -3,7 +3,14 @@ import { Send, Bot, User, X, Loader2 } from 'lucide-react';
 import { chatWithGemini } from '../services/gemini';
 import { motion, AnimatePresence } from 'motion/react';
 
-export const AIChatbot: React.FC = () => {
+import { Plant } from '../types';
+
+interface AIChatbotProps {
+  selectedPlant?: Plant | null;
+  plantsInView?: Plant[];
+}
+
+export const AIChatbot: React.FC<AIChatbotProps> = ({ selectedPlant, plantsInView = [] }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: 'user' | 'bot'; text: string }[]>([
     { role: 'bot', text: 'Hi! I am your PlantCare AI assistant. How can I help you today?' }
@@ -26,7 +33,23 @@ export const AIChatbot: React.FC = () => {
     setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
     setIsLoading(true);
 
-    const response = await chatWithGemini(userMsg);
+    let contextPrompt = userMsg;
+    if (selectedPlant) {
+      contextPrompt = `The user is currently looking at their ${selectedPlant.name} (${selectedPlant.type}). 
+      Health: ${selectedPlant.healthStatus}. 
+      Last watered: ${selectedPlant.lastWatered}. 
+      Last fertilized: ${selectedPlant.lastFertilized}.
+      
+      User question: ${userMsg}`;
+    } else if (plantsInView.length > 0) {
+      const plantList = plantsInView.map(p => `- ${p.name} (${p.type})`).join('\n');
+      contextPrompt = `The user is currently viewing their garden with the following plants:
+      ${plantList}
+      
+      User question: ${userMsg}`;
+    }
+
+    const response = await chatWithGemini(contextPrompt);
     setMessages(prev => [...prev, { role: 'bot', text: response }]);
     setIsLoading(false);
   };

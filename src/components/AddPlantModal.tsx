@@ -18,6 +18,7 @@ export const AddPlantModal: React.FC<AddPlantModalProps> = ({ onClose, onAdd }) 
     height: 10,
     age: 0,
     wateringFrequency: 2,
+    fertilizationFrequency: 15,
     healthStatus: 'Good' as HealthStatus,
     notes: '',
     imageUrl: ''
@@ -55,7 +56,8 @@ export const AddPlantModal: React.FC<AddPlantModalProps> = ({ onClose, onAdd }) 
     onAdd({
       ...formData,
       lastWatered: new Date().toISOString(),
-      lastFertilized: new Date().toISOString()
+      lastFertilized: new Date().toISOString(),
+      lastChecked: new Date().toISOString()
     });
     onClose();
   };
@@ -166,6 +168,16 @@ export const AddPlantModal: React.FC<AddPlantModalProps> = ({ onClose, onAdd }) 
                 type="number" 
                 value={formData.wateringFrequency}
                 onChange={(e) => setFormData({ ...formData, wateringFrequency: Number(e.target.value) })}
+                className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fertilization Frequency (days)</label>
+              <input 
+                type="number" 
+                value={formData.fertilizationFrequency}
+                onChange={(e) => setFormData({ ...formData, fertilizationFrequency: Number(e.target.value) })}
                 className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 focus:ring-2 focus:ring-emerald-500"
               />
             </div>

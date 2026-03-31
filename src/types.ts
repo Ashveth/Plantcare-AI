@@ -10,10 +10,12 @@ export interface Plant {
   age: number;
   lastWatered: string; // ISO 8601
   wateringFrequency: number; // in days
+  fertilizationFrequency: number; // in days
   healthStatus: HealthStatus;
   notes: string;
   imageUrl: string;
   lastFertilized: string; // ISO 8601
+  lastChecked: string; // ISO 8601
 }
 
 export interface GrowthLog {
