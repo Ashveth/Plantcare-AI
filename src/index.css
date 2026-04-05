@@ -1,1 +1,77 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Be+Vietnam+Pro:wght@300;400;500;600&display=swap');
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-headline: "Plus Jakarta Sans", sans-serif;
+    --font-body: "Be Vietnam Pro", sans-serif;
+    --font-sans: "Be Vietnam Pro", sans-serif;
+
+    --color-background: #f4fbf7;
+    --color-primary: #006e1c;
+    --color-primary-container: #4caf50;
+    --color-on-primary-container: #003c0b;
+    --color-secondary: #42673f;
+    --color-surface: #f4fbf7;
+    --color-on-surface: #161d1b;
+    --color-surface-container: #e8efec;
+    --color-surface-container-low: #eef5f1;
+    --color-surface-container-lowest: #ffffff;
+    --color-surface-container-high: #e3eae6;
+    --color-surface-container-highest: #dde4e0;
+    --color-on-surface-variant: #3f4a3c;
+    --color-outline: #6f7a6b;
+    --color-border: oklch(0.9 0.01 160);
+    --color-ring: oklch(0.45 0.15 145);
+    --color-error: #ba1a1a;
+
+    --radius-lg: 2rem;
+    --radius-xl: 3rem;
+}
+
+:root {
+    --background: oklch(0.98 0.01 160);
+    --foreground: oklch(0.15 0.01 160);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.15 0.01 160);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.15 0.01 160);
+    --primary: oklch(0.45 0.15 145);
+    --primary-foreground: oklch(0.98 0.01 160);
+    --secondary: oklch(0.45 0.05 145);
+    --secondary-foreground: oklch(0.98 0.01 160);
+    --muted: oklch(0.95 0.01 160);
+    --muted-foreground: oklch(0.45 0.01 160);
+    --accent: oklch(0.95 0.01 160);
+    --accent-foreground: oklch(0.15 0.01 160);
+    --destructive: oklch(0.55 0.2 25);
+    --destructive-foreground: oklch(0.98 0.01 160);
+    --border: oklch(0.9 0.01 160);
+    --input: oklch(0.9 0.01 160);
+    --ring: oklch(0.45 0.15 145);
+    --radius: 1rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-on-surface font-body;
+  }
+  h1, h2, h3, .brand {
+    @apply font-headline;
+  }
+}
+
+.organic-gradient {
+  background: linear-gradient(135deg, #006e1c 0%, #4caf50 100%);
+}
+
+.glass-nav {
+  background: rgba(244, 251, 247, 0.7);
+  backdrop-filter: blur(20px);
+}

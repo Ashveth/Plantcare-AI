@@ -13,34 +13,66 @@
     },
     "Plant": {
       "title": "Plant Profile",
-      "description": "Detailed information about a user's plant.",
+      "description": "Detailed information about a user's plant, including AI-generated care guides and history.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique plant ID" },
         "ownerUid": { "type": "string", "description": "UID of the user who owns this plant" },
         "name": { "type": "string", "description": "Name of the plant" },
-        "type": { "type": "string", "enum": ["Flowering", "Indoor", "Outdoor", "Medicinal", "Succulent"], "description": "Type of plant" },
-        "height": { "type": "number", "description": "Current height in cm" },
-        "age": { "type": "number", "description": "Age in days" },
-        "lastWatered": { "type": "string", "format": "date-time", "description": "ISO 8601 date of last watering" },
-        "wateringFrequency": { "type": "number", "description": "Watering frequency in days" },
-        "healthStatus": { "type": "string", "enum": ["Good", "Moderate", "Poor"], "description": "Current health status" },
-        "notes": { "type": "string", "description": "User notes about the plant" },
+        "species": { "type": "string", "description": "Species or type of the plant" },
+        "isIndoor": { "type": "boolean", "description": "Whether the plant is indoors" },
+        "plantationDate": { "type": "string", "format": "date-time", "description": "ISO 8601 date of plantation" },
+        "location": { "type": "string", "description": "Location (balcony, room, garden, etc.)" },
+        "potSize": { "type": "string", "description": "Size of the pot" },
         "imageUrl": { "type": "string", "description": "URL to the plant's image" },
-        "lastFertilized": { "type": "string", "format": "date-time", "description": "ISO 8601 date of last fertilization" }
+        "expectedLifespan": { "type": "string", "description": "AI-generated expected lifespan" },
+        "healthStatus": { "type": "string", "description": "Current health status (AI generated)" },
+        "description": { "type": "string", "description": "AI-generated description of the plant" },
+        "careRequirements": {
+          "type": "object",
+          "description": "AI-generated care requirements (watering, sunlight, etc.)"
+        },
+        "fertilizerSchedule": {
+          "type": "object",
+          "description": "AI-generated lifetime fertilizer schedule"
+        },
+        "notificationsEnabled": { "type": "boolean", "description": "Whether care notifications are enabled" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
       },
-      "required": ["ownerUid", "name", "type", "height", "age", "lastWatered", "wateringFrequency", "healthStatus"]
+      "required": ["ownerUid", "name", "species", "isIndoor", "plantationDate", "location"]
     },
-    "GrowthLog": {
-      "title": "Growth Log",
-      "description": "Historical height data for tracking growth over time.",
+    "FarmerLog": {
+      "title": "Farmer Diary Log",
+      "description": "A log entry for farming activities like fertilizer usage, irrigation, sowing, etc.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "description": "UID of the user who owns this log" },
+        "date": { "type": "string", "format": "date-time", "description": "ISO 8601 date of the activity" },
+        "type": { "type": "string", "enum": ["fertilizer", "pesticide", "irrigation", "sowing", "harvest", "expense", "income"], "description": "Type of activity" },
+        "cropName": { "type": "string", "description": "Name of the crop or plant" },
+        "productName": { "type": "string", "description": "Name of the product used (if applicable)" },
+        "quantity": { "type": "string", "description": "Quantity used or harvested" },
+        "areaCovered": { "type": "string", "description": "Land or area covered" },
+        "cost": { "type": "number", "description": "Cost or income amount (optional)" },
+        "notes": { "type": "string", "description": "Additional notes" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["ownerUid", "date", "type", "cropName"]
+    },
+    "Event": {
+      "title": "Plant Event",
+      "description": "An event in the plant's lifetime (care task, health issue, or milestone).",
       "type": "object",
       "properties": {
         "plantId": { "type": "string", "description": "ID of the plant" },
-        "height": { "type": "number", "description": "Height in cm at the time of log" },
-        "timestamp": { "type": "string", "format": "date-time", "description": "ISO 8601 date of the log" }
+        "type": { "type": "string", "enum": ["watering", "fertilizing", "repotting", "pruning", "health_issue", "milestone"], "description": "Type of event" },
+        "date": { "type": "string", "format": "date-time", "description": "ISO 8601 date of the event" },
+        "status": { "type": "string", "enum": ["pending", "completed", "skipped", "snoozed", "resolved"], "description": "Status of the event" },
+        "notes": { "type": "string", "description": "User notes or log details" },
+        "aiDiagnosis": { "type": "string", "description": "AI-generated diagnosis for health issues" },
+        "aiSolution": { "type": "string", "description": "AI-generated solution for health issues" }
       },
-      "required": ["plantId", "height", "timestamp"]
+      "required": ["plantId", "type", "date", "status"]
     }
   },
   "firestore": {
@@ -52,9 +84,13 @@
       "schema": "Plant",
       "description": "Plant profile documents"
     },
-    "/plants/{plantId}/growthLogs/{logId}": {
-      "schema": "GrowthLog",
-      "description": "Growth history for a specific plant"
+    "/plants/{plantId}/events/{eventId}": {
+      "schema": "Event",
+      "description": "History and scheduled events for a specific plant"
+    },
+    "/farmer_logs/{logId}": {
+      "schema": "FarmerLog",
+      "description": "Farmer diary log entries"
     }
   }
 }

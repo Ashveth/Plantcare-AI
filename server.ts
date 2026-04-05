@@ -14,7 +14,30 @@ async function startServer() {
 
   // API Health Check
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Get Daily Plant Tip
+  app.get("/api/tips", (req, res) => {
+    const tips = [
+      "Check the soil moisture before watering; most plants prefer to dry out slightly.",
+      "Rotate your plants every few weeks to ensure even growth.",
+      "Clean the leaves of your indoor plants to help them photosynthesize better.",
+      "Group plants with similar humidity needs together.",
+      "Use lukewarm water for tropical plants to avoid shocking their roots."
+    ];
+    const randomTip = tips[Math.floor(Math.random() * tips.length)];
+    res.json({ tip: randomTip });
+  });
+
+  // Get System Stats (Mock)
+  app.get("/api/stats", (req, res) => {
+    res.json({
+      activeUsers: 1240,
+      plantsMonitored: 8500,
+      aiDiagnoses: 3200,
+      uptime: process.uptime()
+    });
   });
 
   // Vite middleware for development

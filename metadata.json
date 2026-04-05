@@ -1,5 +1,5 @@
 {
-  "name": "PlantCare AI",
-  "description": "A comprehensive plant management app with AI-powered health monitoring, watering reminders, and growth tracking.",
+  "name": "GrowMate",
+  "description": "A comprehensive plant management app with an AI-powered Plant Lifetime Profile System, health monitoring, care diaries, and smart assistants for every plant.",
   "requestFramePermissions": ["camera"]
 }
