@@ -73,6 +73,24 @@
         "aiSolution": { "type": "string", "description": "AI-generated solution for health issues" }
       },
       "required": ["plantId", "type", "date", "status"]
+    },
+    "Land": {
+      "title": "Land Profile",
+      "description": "Information about a farmer's land for AI-powered planning.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "description": "UID of the user who owns this land" },
+        "name": { "type": "string", "description": "Name of the land" },
+        "area": { "type": "string", "description": "Size of the area" },
+        "areaUnit": { "type": "string", "enum": ["acres", "hectares", "sq_meters", "bigha"], "description": "Unit of measurement" },
+        "cropType": { "type": "string", "description": "Type of crop being grown" },
+        "treesPlanted": { "type": "string", "description": "Trees or plants already planted on the land" },
+        "soilType": { "type": "string", "description": "Type of soil" },
+        "location": { "type": "string", "description": "Location of the land" },
+        "aiReport": { "type": "object", "description": "AI-generated future report and roadmap" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["ownerUid", "name", "area", "areaUnit", "cropType"]
     }
   },
   "firestore": {
@@ -91,6 +109,10 @@
     "/farmer_logs/{logId}": {
       "schema": "FarmerLog",
       "description": "Farmer diary log entries"
+    },
+    "/lands/{landId}": {
+      "schema": "Land",
+      "description": "Farmer land profiles for AI planning"
     }
   }
 }

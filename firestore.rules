@@ -12,6 +12,12 @@ service cloud.firestore {
     //   - uid: string (required)
     //   - email: string (required, email format)
     //   - displayName: string (optional)
+    //   - phone: string (optional)
+    //   - farmName: string (optional)
+    //   - location: string (optional)
+    //   - bio: string (optional)
+    //   - profileImageUrl: string (optional)
+    //   - createdAt: string (optional)
     //
     // Collection: plants
     // Document ID: {plantId}
@@ -57,6 +63,18 @@ service cloud.firestore {
     //   - notes: string (optional, size < 2000)
     //   - createdAt: string (optional, ISO 8601)
     //
+    // Collection: lands
+    // Document ID: {landId}
+    // Fields:
+    //   - ownerUid: string (required)
+    //   - name: string (required, size < 100)
+    //   - area: string (required, size < 50)
+    //   - areaUnit: string (required, enum)
+    //   - cropType: string (required, size < 100)
+    //   - soilType: string (optional, size < 100)
+    //   - location: string (optional, size < 100)
+    //   - createdAt: string (optional, ISO 8601)
+    //
     // ===============================================================
 
     // Helper Functions
@@ -93,7 +111,13 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.uid == request.auth.uid &&
              data.email is string && isValidEmail(data.email) &&
-             (!('role' in data) || data.role in ['user', 'admin']);
+             (!('role' in data) || data.role in ['user', 'admin']) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 20)) &&
+             (!('farmName' in data) || (data.farmName is string && data.farmName.size() < 100)) &&
+             (!('location' in data) || (data.location is string && data.location.size() < 100)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() < 2000)) &&
+             (!('profileImageUrl' in data) || (data.profileImageUrl is string)) &&
+             (!('createdAt' in data) || isValidDateString(data.createdAt));
     }
 
     function isValidPlant(data) {
@@ -137,6 +161,19 @@ service cloud.firestore {
              (!('createdAt' in data) || isValidDateString(data.createdAt));
     }
 
+    function isValidLand(data) {
+      return data.ownerUid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.area is string && data.area.size() > 0 && data.area.size() < 50 &&
+             data.areaUnit in ['acres', 'hectares', 'sq_meters', 'bigha'] &&
+             data.cropType is string && data.cropType.size() > 0 && data.cropType.size() < 100 &&
+             (!('treesPlanted' in data) || (data.treesPlanted is string && data.treesPlanted.size() < 500)) &&
+             (!('soilType' in data) || (data.soilType is string && data.soilType.size() < 100)) &&
+             (!('location' in data) || (data.location is string && data.location.size() < 100)) &&
+             (!('aiReport' in data) || (data.aiReport is map)) &&
+             (!('createdAt' in data) || isValidDateString(data.createdAt));
+    }
+
     // Rules
     match /users/{uid} {
       allow read: if isOwner(uid) || isAdmin();
@@ -157,10 +194,22 @@ service cloud.firestore {
       }
     }
 
+    // Collection Group Rules
+    match /{path=**}/events/{eventId} {
+      allow read: if isAuthenticated() && (get(/databases/$(database)/documents/plants/$(resource.data.plantId)).data.ownerUid == request.auth.uid || isAdmin());
+    }
+
     match /farmer_logs/{logId} {
       allow read: if isDocOwner() || isAdmin();
       allow create: if isAuthenticated() && isValidFarmerLog(request.resource.data);
       allow update: if (isDocOwner() || isAdmin()) && isValidFarmerLog(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /lands/{landId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidLand(request.resource.data);
+      allow update: if (isDocOwner() || isAdmin()) && isValidLand(request.resource.data);
       allow delete: if isDocOwner() || isAdmin();
     }
   }

@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import { 
   collection, 
+  collectionGroup,
   query, 
   where, 
   onSnapshot, 
@@ -16,6 +17,8 @@ import {
   doc, 
   updateDoc, 
   deleteDoc,
+  setDoc,
+  getDoc,
   serverTimestamp,
   orderBy
 } from 'firebase/firestore';
@@ -32,6 +35,7 @@ import {
   MessageCircle, 
   AlertCircle, 
   ChevronRight,
+  ChevronDown,
   Home,
   Settings,
   Bell,
@@ -56,11 +60,14 @@ import {
   Lightbulb,
   Activity,
   BookOpen,
+  Zap,
   DollarSign,
   Package,
-  Edit
+  Edit,
+  CloudRain,
+  Trophy
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { format, differenceInDays, addDays, isAfter, isBefore, startOfDay } from 'date-fns';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '../components/ui/card';
@@ -73,7 +80,8 @@ import { Badge } from '../components/ui/badge';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Switch } from '../components/ui/switch';
 import { Textarea } from '../components/ui/textarea';
-import { Plant, PlantEvent, FarmerLog } from './types';
+import { Toaster, toast } from 'sonner';
+import { Plant, PlantEvent, FarmerLog, Land, LandAIReport, UserProfile } from './types';
 import { 
   LineChart, 
   Line, 
@@ -91,8 +99,162 @@ import {
   Pie,
   Legend
 } from 'recharts';
-import { generatePlantProfile, diagnosePlantIssue, chatExpert, generateFarmerInsights } from './services/geminiService';
+import { generatePlantProfile, diagnosePlantIssue, chatExpert, generateFarmerInsights, generateLandReport } from './services/geminiService';
 import ReactMarkdown from 'react-markdown';
+
+const isValidDate = (date: any) => {
+  if (!date) return false;
+  const d = new Date(date);
+  return d instanceof Date && !isNaN(d.getTime());
+};
+
+const calculateHealth = (events: PlantEvent[]) => {
+  let health = 90;
+  const sortedEvents = [...events].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  sortedEvents.forEach(e => {
+    if (e.type === 'health_issue') health -= 20;
+    else if (e.status === 'completed') health += 5;
+  });
+  return Math.min(100, Math.max(0, health));
+};
+
+const calculateHealthHistory = (events: PlantEvent[], plantationDate: string) => {
+  const history: { date: string, health: number }[] = [];
+  let health = 90;
+  
+  const startDate = plantationDate ? plantationDate.split('T')[0] : new Date().toISOString().split('T')[0];
+  
+  history.push({
+    date: startDate,
+    health: health
+  });
+
+  const sortedEvents = [...events]
+    .filter(e => e.status !== 'pending')
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  sortedEvents.forEach(e => {
+    if (e.type === 'health_issue') health -= 20;
+    else if (e.status === 'completed') health += 5;
+    
+    health = Math.min(100, Math.max(0, health));
+    
+    history.push({
+      date: e.date.split('T')[0],
+      health: health
+    });
+  });
+
+  return history;
+};
+
+const getHealthStatus = (health: number) => {
+  if (health >= 80) return { label: 'Optimal', color: 'bg-green-500', text: 'text-white' };
+  if (health >= 50) return { label: 'Needs Attention', color: 'bg-amber-500', text: 'text-white' };
+  return { label: 'Critical', color: 'bg-red-500', text: 'text-white' };
+};
+
+const PlantCard = ({ plant, onClick }: { plant: Plant, onClick: () => void }) => {
+  const [events, setEvents] = useState<PlantEvent[]>([]);
+  
+  useEffect(() => {
+    const q = query(collection(db, `plants/${plant.id}/events`), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const eList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlantEvent));
+      setEvents(eList);
+    }, (error) => {
+      console.error("Error fetching events for plant card:", error);
+    });
+    return () => unsubscribe();
+  }, [plant.id]);
+
+  const health = calculateHealth(events);
+  const status = getHealthStatus(health);
+
+  return (
+    <motion.div
+      whileHover={{ y: -8 }}
+      className="group cursor-pointer overflow-hidden rounded-3xl bg-surface-container-lowest shadow-2xl shadow-green-900/5 transition-all hover:shadow-primary/10"
+      onClick={onClick}
+    >
+      <div className="relative h-64 overflow-hidden">
+        <img 
+          src={plant.imageUrl || `https://picsum.photos/seed/${plant.species}/600/400`} 
+          alt={plant.name}
+          className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
+          referrerPolicy="no-referrer"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="absolute top-4 right-4">
+          <Badge className={`${status.color} ${status.text} border-none font-bold uppercase text-[10px] tracking-widest shadow-lg px-3 py-1`}>
+            {status.label}
+          </Badge>
+        </div>
+        <div className="absolute bottom-4 left-4 right-4 translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all">
+          <Button className="w-full organic-gradient text-white font-bold rounded-full">View Profile</Button>
+        </div>
+      </div>
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xl font-black text-green-900">{plant.name}</h3>
+          <div className="flex items-center gap-1.5">
+            <div className={`w-2 h-2 rounded-full ${status.color} animate-pulse`} />
+            <span className="text-[10px] font-black text-primary uppercase tracking-widest">{health}%</span>
+          </div>
+        </div>
+        <p className="text-sm font-medium text-green-800/60 mb-4">{plant.species}</p>
+        <div className="flex items-center gap-4 text-xs font-bold text-green-800/40 uppercase tracking-widest">
+          <div className="flex items-center gap-1">
+            <Droplets className="h-3 w-3" />
+            {plant.careRequirements?.wateringFrequency.split(' ')[0] || "N/A"}
+          </div>
+          <div className="flex items-center gap-1">
+            <Sun className="h-3 w-3" />
+            {plant.careRequirements?.sunlightRequirement.split(' ')[0] || "N/A"}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+const safeFormat = (date: any, formatStr: string) => {
+  if (!isValidDate(date)) return 'Invalid Date';
+  return format(new Date(date), formatStr);
+};
+
+const formatCareValue = (value: string | undefined) => {
+  if (!value) return 'Not specified';
+  
+  // Handle short codes like 7d, 3w, 1m
+  const match = value.match(/^(\d+)([dwm])$/i);
+  if (match) {
+    const num = match[1];
+    const unit = match[2].toLowerCase();
+    const unitStr = unit === 'd' ? 'days' : unit === 'w' ? 'weeks' : 'months';
+    return `Every ${num} ${unitStr}`;
+  }
+  
+  // Handle cases like "7 days" -> "Every 7 days" if it doesn't already start with "Every" or "Once"
+  if (/^\d+\s+(days?|weeks?|months?)$/i.test(value)) {
+    return `Every ${value}`;
+  }
+
+  return value;
+};
+
+const getFrequencyInDays = (freq: string | undefined): number => {
+  if (!freq) return 7;
+  const numMatch = freq.match(/\d+/);
+  const num = numMatch ? parseInt(numMatch[0]) : 7;
+  
+  const lower = freq.toLowerCase();
+  if (lower.includes('week')) return num * 7;
+  if (lower.includes('month')) return num * 30;
+  if (lower.includes('day')) return num;
+  
+  return 7;
+};
 
 enum OperationType {
   CREATE = 'create',
@@ -298,6 +460,259 @@ const FarmerLogForm = ({ onAdd, onCancel, isLoading }: { onAdd: (data: any) => v
   );
 };
 
+const FarmPlanner = ({ lands, onAddLand, onDeleteLand }: { lands: Land[], onAddLand: (data: any) => void, onDeleteLand: (id: string) => void }) => {
+  const [isAddingLand, setIsAddingLand] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    area: '',
+    areaUnit: 'acres' as const,
+    cropType: '',
+    treesPlanted: '',
+    soilType: '',
+    location: ''
+  });
+  const [isGenerating, setIsGenerating] = useState<string | null>(null);
+
+  const handleGenerateReport = async (land: Land) => {
+    setIsGenerating(land.id);
+    try {
+      const report = await generateLandReport(land);
+      await updateDoc(doc(db, 'lands', land.id), {
+        aiReport: report
+      });
+      toast.success("AI Future Report Generated & Saved!");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to generate AI report.");
+    } finally {
+      setIsGenerating(null);
+    }
+  };
+
+  return (
+    <div className="space-y-8 max-w-7xl mx-auto pb-20">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Brain className="h-6 w-6 text-primary" />
+            <h2 className="text-2xl font-black text-slate-800">AI Farm Planner</h2>
+          </div>
+          <p className="text-slate-500 text-sm font-medium">Manage your land and get AI-powered future insights</p>
+        </div>
+        <Button 
+          onClick={() => setIsAddingLand(true)} 
+          className="organic-gradient rounded-xl text-white font-bold flex items-center gap-2 px-6"
+        >
+          <Plus className="h-5 w-5" /> Add Land
+        </Button>
+      </div>
+
+      {isAddingLand && (
+        <Card className="rounded-2xl border-slate-100 shadow-xl overflow-hidden">
+          <div className="organic-gradient p-6 text-white">
+            <h3 className="text-xl font-bold">Register New Land</h3>
+            <p className="text-green-50/80 text-sm">Tell us about your land to get started with AI planning.</p>
+          </div>
+          <CardContent className="p-8">
+            <form onSubmit={(e) => { e.preventDefault(); onAddLand(formData); setIsAddingLand(false); }} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label className="font-bold">Land Name</Label>
+                  <Input 
+                    placeholder="e.g. North Field" 
+                    value={formData.name} 
+                    onChange={e => setFormData({...formData, name: e.target.value})}
+                    required
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Crop Type</Label>
+                  <Input 
+                    placeholder="e.g. Wheat, Rice, Cotton" 
+                    value={formData.cropType} 
+                    onChange={e => setFormData({...formData, cropType: e.target.value})}
+                    required
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Area</Label>
+                  <div className="flex gap-2">
+                    <Input 
+                      type="number" 
+                      placeholder="Size" 
+                      value={formData.area} 
+                      onChange={e => setFormData({...formData, area: e.target.value})}
+                      required
+                      className="rounded-xl flex-1"
+                    />
+                    <Select value={formData.areaUnit} onValueChange={(val: any) => setFormData({...formData, areaUnit: val})}>
+                      <SelectTrigger className="w-32 rounded-xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="acres">Acres</SelectItem>
+                        <SelectItem value="hectares">Hectares</SelectItem>
+                        <SelectItem value="sq_meters">Sq Meters</SelectItem>
+                        <SelectItem value="bigha">Bigha</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label className="font-bold">Trees/Plants Already Planted</Label>
+                  <Input 
+                    placeholder="e.g. 50 Mango trees, 20 Neem trees" 
+                    value={formData.treesPlanted} 
+                    onChange={e => setFormData({...formData, treesPlanted: e.target.value})}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Soil Type (Optional)</Label>
+                  <Input 
+                    placeholder="e.g. Clay, Sandy, Loam" 
+                    value={formData.soilType} 
+                    onChange={e => setFormData({...formData, soilType: e.target.value})}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Location (Optional)</Label>
+                  <Input 
+                    placeholder="e.g. Village Name, District" 
+                    value={formData.location} 
+                    onChange={e => setFormData({...formData, location: e.target.value})}
+                    className="rounded-xl"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-4">
+                <Button type="button" variant="ghost" onClick={() => setIsAddingLand(false)} className="rounded-xl font-bold">Cancel</Button>
+                <Button type="submit" className="organic-gradient rounded-xl text-white font-bold px-8">Register Land</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 gap-8">
+        {lands.map(land => (
+          <Card key={land.id} className="rounded-2xl border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
+            <div className="p-6 bg-slate-50/50 border-b flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <Sprout className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-slate-800">{land.name}</h3>
+                  <p className="text-sm text-slate-500 font-medium">{land.area} {land.areaUnit} • Growing {land.cropType}</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={() => handleGenerateReport(land)} 
+                  disabled={isGenerating === land.id}
+                  className="organic-gradient rounded-xl text-white font-bold flex items-center gap-2"
+                >
+                  {isGenerating === land.id ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  {land.aiReport ? "Regenerate AI Report" : "Generate AI Report"}
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => onDeleteLand(land.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl">
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+            <CardContent className="p-8">
+              {land.aiReport ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-blue-600 font-bold">
+                      <Droplets className="h-5 w-5" />
+                      <h4>Watering Schedule</h4>
+                    </div>
+                    <p className="text-sm text-slate-600 leading-relaxed">{land.aiReport.wateringSchedule}</p>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-orange-600 font-bold">
+                      <Package className="h-5 w-5" />
+                      <h4>Fertilizer Needs</h4>
+                    </div>
+                    <p className="text-sm text-slate-600 leading-relaxed">{land.aiReport.fertilizerNeeds}</p>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-red-600 font-bold">
+                      <AlertTriangle className="h-5 w-5" />
+                      <h4>Pest Alerts</h4>
+                    </div>
+                    <p className="text-sm text-slate-600 leading-relaxed">{land.aiReport.pestAlerts}</p>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-green-700 font-bold">
+                      <Calendar className="h-5 w-5" />
+                      <h4>Harvest Prediction</h4>
+                    </div>
+                    <p className="text-sm text-slate-600 leading-relaxed">{land.aiReport.harvestPrediction}</p>
+                  </div>
+                  <div className="md:col-span-2 space-y-3 bg-primary/5 p-6 rounded-2xl border border-primary/10">
+                    <div className="flex items-center gap-2 text-primary font-bold">
+                      <Lightbulb className="h-5 w-5" />
+                      <h4>AI Strategic Advice</h4>
+                    </div>
+                    <p className="text-sm text-slate-700 leading-relaxed italic">"{land.aiReport.generalAdvice}"</p>
+                  </div>
+                  
+                  <div className="md:col-span-3 space-y-6 mt-4">
+                    <div className="flex items-center gap-2 text-slate-800 font-black text-lg">
+                      <History className="h-6 w-6 text-primary" />
+                      <h4>12-Month Care Roadmap</h4>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {land.aiReport.roadmap.map((step, idx) => (
+                        <div key={idx} className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm hover:shadow-md transition-all">
+                          <div className="flex justify-between items-start mb-3">
+                            <span className="text-xs font-black text-primary uppercase tracking-widest bg-primary/5 px-3 py-1 rounded-full">
+                              {step.month}
+                            </span>
+                          </div>
+                          <h5 className="font-bold text-slate-800 mb-2">{step.action}</h5>
+                          <p className="text-xs text-slate-500 leading-relaxed">{step.details}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-slate-50/30 rounded-2xl border-2 border-dashed border-slate-100">
+                  <Brain className="h-12 w-12 text-slate-200 mx-auto mb-4" />
+                  <h4 className="text-lg font-bold text-slate-400">No AI Report Ready</h4>
+                  <p className="text-sm text-slate-400 max-w-xs mx-auto mt-2">Click the button above to generate a future-focused AI report for this land.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+        {lands.length === 0 && !isAddingLand && (
+          <div className="text-center py-24 bg-white rounded-3xl border-2 border-dashed border-slate-100 shadow-sm">
+            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Plus className="h-10 w-10 text-slate-200" />
+            </div>
+            <h3 className="text-2xl font-black text-slate-800">No lands registered</h3>
+            <p className="text-slate-500 max-w-xs mx-auto mt-2">Register your farming land to start receiving AI-powered future reports and planning.</p>
+            <Button 
+              onClick={() => setIsAddingLand(true)}
+              className="mt-8 organic-gradient h-14 px-10 rounded-full text-white font-bold shadow-lg"
+            >
+              Register Your First Land
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const FarmerDiary = ({ logs, onAdd, onDelete }: { logs: FarmerLog[], onAdd: (data: any) => void, onDelete: (id: string) => void }) => {
   const [isAddingLog, setIsAddingLog] = useState(false);
   const [filterType, setFilterType] = useState<string>('all');
@@ -309,6 +724,7 @@ const FarmerDiary = ({ logs, onAdd, onDelete }: { logs: FarmerLog[], onAdd: (dat
   const totalProfit = totalIncome - totalExpenses;
 
   const filteredLogs = logs.filter(log => {
+    if (!isValidDate(log.date)) return false;
     const matchesType = filterType === 'all' || log.type === filterType;
     const matchesFrom = !dateFrom || isAfter(new Date(log.date), startOfDay(new Date(dateFrom))) || format(new Date(log.date), 'yyyy-MM-dd') === dateFrom;
     const matchesTo = !dateTo || isBefore(new Date(log.date), startOfDay(addDays(new Date(dateTo), 1)));
@@ -323,7 +739,8 @@ const FarmerDiary = ({ logs, onAdd, onDelete }: { logs: FarmerLog[], onAdd: (dat
   ].filter(d => d.value > 0);
 
   const incomeVsExpenseData = logs.reduce((acc: any[], log) => {
-    const date = format(new Date(log.date), 'MMM dd');
+    if (!log.date || !isValidDate(log.date)) return acc;
+    const date = safeFormat(log.date, 'MMM dd');
     const existing = acc.find(d => d.date === date);
     if (existing) {
       existing.income += (log.income || 0);
@@ -332,7 +749,11 @@ const FarmerDiary = ({ logs, onAdd, onDelete }: { logs: FarmerLog[], onAdd: (dat
       acc.push({ date, income: log.income || 0, expense: log.expense || 0 });
     }
     return acc;
-  }, []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(-7);
+  }, []).sort((a, b) => {
+    const dateA = new Date(a.date).getTime();
+    const dateB = new Date(b.date).getTime();
+    return dateA - dateB;
+  }).slice(-7);
 
   const categories = [
     { id: 'all', label: 'All', icon: null },
@@ -551,7 +972,7 @@ const FarmerDiary = ({ logs, onAdd, onDelete }: { logs: FarmerLog[], onAdd: (dat
                 <h4 className="font-bold text-slate-800 capitalize">{log.title}</h4>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
-                    <Calendar className="h-3 w-3" /> {format(new Date(log.date), 'dd MMM yyyy')}
+                    <Calendar className="h-3 w-3" /> {safeFormat(log.date, 'dd MMM yyyy')}
                   </span>
                   <span className="text-slate-300">•</span>
                   <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
@@ -599,7 +1020,7 @@ const FarmerDiary = ({ logs, onAdd, onDelete }: { logs: FarmerLog[], onAdd: (dat
 
 // --- Components ---
 
-const Navbar = ({ user, onSignOut }: { user: User | null, onSignOut: () => void }) => (
+const Navbar = ({ user, profile, onSignOut }: { user: User | null, profile: UserProfile | null, onSignOut: () => void }) => (
   <nav className="fixed top-0 z-50 flex w-full items-center justify-between px-6 py-4 glass-nav">
     <div className="flex items-center gap-8">
       <span className="brand text-2xl font-extrabold tracking-tighter text-green-800">GrowMate</span>
@@ -624,7 +1045,7 @@ const Navbar = ({ user, onSignOut }: { user: User | null, onSignOut: () => void 
             </button>
             <div className="absolute right-0 mt-2 hidden w-48 rounded-xl bg-white p-2 shadow-xl group-hover:block">
               <div className="px-4 py-2 border-b mb-2">
-                <p className="text-sm font-bold text-gray-900 truncate">{user.displayName}</p>
+                <p className="text-sm font-bold text-gray-900 truncate">{profile?.displayName || user.displayName || 'Farmer'}</p>
                 <p className="text-xs text-gray-500 truncate">{user.email}</p>
               </div>
               <button 
@@ -641,6 +1062,190 @@ const Navbar = ({ user, onSignOut }: { user: User | null, onSignOut: () => void 
     </div>
   </nav>
 );
+
+const FarmerProfile = ({ profile, onUpdate }: { profile: UserProfile | null, onUpdate: (data: Partial<UserProfile>) => void }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState<Partial<UserProfile>>({});
+
+  useEffect(() => {
+    if (profile) {
+      setFormData({
+        displayName: profile.displayName || '',
+        farmName: profile.farmName || '',
+        location: profile.location || '',
+        phone: profile.phone || '',
+        bio: profile.bio || '',
+      });
+    }
+  }, [profile]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdate(formData);
+    setIsEditing(false);
+  };
+
+  if (!profile) return null;
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
+        <h2 className="text-4xl font-black text-green-900">Farmer Profile</h2>
+        <Button 
+          onClick={() => setIsEditing(!isEditing)} 
+          variant={isEditing ? "ghost" : "outline"}
+          className="rounded-full px-6"
+        >
+          {isEditing ? "Cancel" : "Edit Profile"}
+        </Button>
+      </div>
+
+      <div className="grid gap-8 md:grid-cols-3">
+        <div className="md:col-span-1 space-y-6">
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-green-900/5 text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-24 organic-gradient opacity-10"></div>
+            <div className="relative pt-4">
+              <div className="w-32 h-32 rounded-full bg-primary/10 mx-auto flex items-center justify-center border-4 border-white shadow-lg overflow-hidden">
+                {profile.profileImageUrl ? (
+                  <img src={profile.profileImageUrl} alt={profile.displayName} className="w-full h-full object-cover" />
+                ) : (
+                  <UserIcon className="h-16 w-16 text-primary" />
+                )}
+              </div>
+              <h3 className="mt-4 text-2xl font-black text-green-900">{profile.displayName || "Anonymous Farmer"}</h3>
+              <p className="text-sm font-medium text-green-800/60">{profile.email}</p>
+              <div className="mt-6 flex justify-center gap-2">
+                <Badge variant="outline" className="rounded-full border-primary/20 text-primary">Master Gardener</Badge>
+                <Badge variant="outline" className="rounded-full border-primary/20 text-primary">Verified</Badge>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-green-900/5 space-y-4">
+            <h4 className="font-black text-green-900 uppercase tracking-widest text-xs">Quick Stats</h4>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-green-800/60 font-medium">Member Since</span>
+                <span className="text-sm font-bold text-green-900">{profile.createdAt ? safeFormat(profile.createdAt, 'MMM yyyy') : 'N/A'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-green-800/60 font-medium">Farm Location</span>
+                <span className="text-sm font-bold text-green-900">{profile.location || 'Not set'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="md:col-span-2">
+          {isEditing ? (
+            <form onSubmit={handleSubmit} className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-green-900/5 space-y-6">
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="font-bold">Full Name</Label>
+                  <Input 
+                    value={formData.displayName} 
+                    onChange={e => setFormData({...formData, displayName: e.target.value})}
+                    placeholder="Your Name"
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Farm Name</Label>
+                  <Input 
+                    value={formData.farmName} 
+                    onChange={e => setFormData({...formData, farmName: e.target.value})}
+                    placeholder="Green Valley Farm"
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Location</Label>
+                  <Input 
+                    value={formData.location} 
+                    onChange={e => setFormData({...formData, location: e.target.value})}
+                    placeholder="City, Country"
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Phone Number</Label>
+                  <Input 
+                    value={formData.phone} 
+                    onChange={e => setFormData({...formData, phone: e.target.value})}
+                    placeholder="+1 234 567 890"
+                    className="rounded-xl"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="font-bold">Bio / Farm Description</Label>
+                <Textarea 
+                  value={formData.bio} 
+                  onChange={e => setFormData({...formData, bio: e.target.value})}
+                  placeholder="Tell us about your botanical journey..."
+                  className="rounded-xl min-h-[120px]"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <Button type="button" variant="ghost" onClick={() => setIsEditing(false)} className="rounded-xl font-bold">Cancel</Button>
+                <Button type="submit" className="organic-gradient text-white font-bold rounded-xl px-10 shadow-lg">Save Changes</Button>
+              </div>
+            </form>
+          ) : (
+            <div className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-green-900/5 space-y-8">
+              <div className="space-y-4">
+                <h4 className="font-black text-green-900 uppercase tracking-widest text-xs">About the Farm</h4>
+                <div className="grid gap-6 md:grid-cols-2">
+                  <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Farm Name</p>
+                    <p className="font-bold text-slate-800">{profile.farmName || "Unnamed Farm"}</p>
+                  </div>
+                  <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Contact</p>
+                    <p className="font-bold text-slate-800">{profile.phone || "No phone added"}</p>
+                  </div>
+                </div>
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Biography</p>
+                  <p className="text-sm text-slate-600 leading-relaxed">{profile.bio || "No biography added yet. Share your story!"}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="font-black text-green-900 uppercase tracking-widest text-xs">Account Settings</h4>
+                <div className="flex items-center justify-between p-6 bg-surface rounded-2xl">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-white rounded-xl shadow-sm">
+                      <Bell className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-800">Push Notifications</p>
+                      <p className="text-xs text-slate-500">Get alerts for watering and fertilizing</p>
+                    </div>
+                  </div>
+                  <Switch 
+                    checked={"Notification" in window && Notification.permission === "granted"}
+                    onCheckedChange={() => {
+                      if ("Notification" in window) {
+                        Notification.requestPermission().then(permission => {
+                          if (permission === "granted") {
+                            toast.success("Notifications enabled!");
+                          } else {
+                            toast.error("Notifications were denied.");
+                          }
+                        });
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const Sidebar = ({ activeTab, onTabChange, onAskAI }: { activeTab: string, onTabChange: (tab: string) => void, onAskAI?: () => void }) => (
   <aside className="sticky top-24 hidden h-[calc(100vh-8rem)] w-64 flex-col rounded-r-xl bg-surface-container-low py-8 shadow-2xl shadow-green-900/5 md:flex">
@@ -677,6 +1282,15 @@ const Sidebar = ({ activeTab, onTabChange, onAskAI }: { activeTab: string, onTab
         <span className="font-medium">Schedule</span>
       </button>
       <button 
+        onClick={() => onTabChange('planner')}
+        className={`flex w-[calc(100%-2rem)] items-center gap-4 mx-4 px-8 py-3 rounded-full transition-transform hover:translate-x-1 ${
+          activeTab === 'planner' ? 'organic-gradient text-white shadow-lg shadow-primary/20' : 'text-green-800/60'
+        }`}
+      >
+        <Brain className="h-5 w-5" />
+        <span className="font-medium">Farm Planner</span>
+      </button>
+      <button 
         onClick={() => onTabChange('diary')}
         className={`flex w-[calc(100%-2rem)] items-center gap-4 mx-4 px-8 py-3 rounded-full transition-transform hover:translate-x-1 ${
           activeTab === 'diary' ? 'organic-gradient text-white shadow-lg shadow-primary/20' : 'text-green-800/60'
@@ -686,13 +1300,13 @@ const Sidebar = ({ activeTab, onTabChange, onAskAI }: { activeTab: string, onTab
         <span className="font-medium">Farmer Diary</span>
       </button>
       <button 
-        onClick={() => onTabChange('settings')}
+        onClick={() => onTabChange('profile')}
         className={`flex w-[calc(100%-2rem)] items-center gap-4 mx-4 px-8 py-3 rounded-full transition-transform hover:translate-x-1 ${
-          activeTab === 'settings' ? 'organic-gradient text-white shadow-lg shadow-primary/20' : 'text-green-800/60'
+          activeTab === 'profile' ? 'organic-gradient text-white shadow-lg shadow-primary/20' : 'text-green-800/60'
         }`}
       >
-        <Settings className="h-5 w-5" />
-        <span className="font-medium">Settings</span>
+        <UserIcon className="h-5 w-5" />
+        <span className="font-medium">Profile</span>
       </button>
     </nav>
     <div className="px-6 mt-auto">
@@ -958,11 +1572,74 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
   plant: Plant, 
   events: PlantEvent[], 
   onUpdateEvent: (eventId: string, status: string) => void,
-  onAddEvent: (type: string, notes: string) => void,
+  onAddEvent: (type: string, notes: string, date?: string) => void,
   setIsChatOpen: (open: boolean) => void
 }) => {
   const [issueInput, setIssueInput] = useState("");
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [isAddingUpdate, setIsAddingUpdate] = useState(false);
+  const [isRefreshingProfile, setIsRefreshingProfile] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
+  const [isTipsOpen, setIsTipsOpen] = useState(true);
+  const [isEditingFertilizer, setIsEditingFertilizer] = useState(false);
+  const [fertForm, setFertForm] = useState({
+    fertilizerType: '',
+    springSummer: '',
+    monsoon: '',
+    winter: '',
+    quantityGuidance: ''
+  });
+
+  const openFertilizerDialog = () => {
+    setFertForm({
+      fertilizerType: plant.fertilizerSchedule?.fertilizerType || '',
+      springSummer: plant.fertilizerSchedule?.seasonalSchedule?.springSummer || '',
+      monsoon: plant.fertilizerSchedule?.seasonalSchedule?.monsoon || '',
+      winter: plant.fertilizerSchedule?.seasonalSchedule?.winter || '',
+      quantityGuidance: plant.fertilizerSchedule?.quantityGuidance || ''
+    });
+    setIsEditingFertilizer(true);
+  };
+
+  const handleUpdateFertilizer = async () => {
+    try {
+      await updateDoc(doc(db, 'plants', plant.id), {
+        fertilizerSchedule: {
+          fertilizerType: fertForm.fertilizerType,
+          seasonalSchedule: {
+            springSummer: fertForm.springSummer,
+            monsoon: fertForm.monsoon,
+            winter: fertForm.winter
+          },
+          quantityGuidance: fertForm.quantityGuidance
+        }
+      });
+      setIsEditingFertilizer(false);
+      toast.success("Fertilizer schedule updated!");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to update fertilizer schedule.");
+    }
+  };
+  const [updateType, setUpdateType] = useState<string>("watering");
+
+  const handleRefreshProfile = async () => {
+    setIsRefreshingProfile(true);
+    try {
+      const aiProfile = await generatePlantProfile(plant);
+      await updateDoc(doc(db, 'plants', plant.id), {
+        ...aiProfile
+      });
+      toast.success("AI Profile refreshed successfully!");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to refresh AI profile.");
+    } finally {
+      setIsRefreshingProfile(false);
+    }
+  };
+  const [updateNotes, setUpdateNotes] = useState("");
+  const [updateDate, setUpdateDate] = useState(new Date().toISOString().split('T')[0]);
 
   const plantationDate = plant.plantationDate ? new Date(plant.plantationDate) : new Date();
   const isValidDate = !isNaN(plantationDate.getTime());
@@ -983,6 +1660,12 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
     }
   };
 
+  const handleAddUpdate = async () => {
+    await onAddEvent(updateType, updateNotes, new Date(updateDate).toISOString());
+    setIsAddingUpdate(false);
+    setUpdateNotes("");
+  };
+
   const upcomingEvents = events
     .filter(e => e.status === 'pending')
     .sort((a, b) => {
@@ -1001,15 +1684,8 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
 
   const milestones = events.filter(e => e.type === 'milestone' || e.type === 'health_issue').sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const currentHealth = (() => {
-    let health = 90;
-    const sortedEvents = [...events].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    sortedEvents.forEach(e => {
-      if (e.type === 'health_issue') health -= 20;
-      else if (e.status === 'completed') health += 5;
-    });
-    return Math.min(100, Math.max(0, health));
-  })();
+  const currentHealth = calculateHealth(events);
+  const healthStatus = getHealthStatus(currentHealth);
 
   const healthTrend = (() => {
     if (events.length < 2) return 'stable';
@@ -1025,6 +1701,12 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
     <div className="flex-1 space-y-10">
       {/* Header Section: Plant Overview */}
       <section className="bg-surface-container-lowest rounded-xl p-8 flex flex-col md:flex-row items-center gap-8 relative overflow-hidden">
+        {!plant.careRequirements && (
+          <div className="absolute top-0 left-0 w-full bg-amber-500/10 border-b border-amber-500/20 py-2 px-4 flex items-center justify-center gap-2 z-10">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">AI Profile missing. Click "Refresh AI Profile" to generate.</span>
+          </div>
+        )}
         <div className="absolute -right-16 -top-16 w-64 h-64 bg-primary/5 rounded-full blur-3xl"></div>
         <div className="relative">
           <div className="w-48 h-48 rounded-full overflow-hidden ring-8 ring-surface-container p-1 bg-white">
@@ -1077,7 +1759,66 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
           </div>
           <div className="flex flex-wrap justify-center md:justify-start gap-4 pt-2">
             <Button variant="outline" className="px-6 py-2.5 rounded-full font-bold">Edit Plant</Button>
-            <Button className="organic-gradient px-6 py-2.5 text-white font-bold rounded-full shadow-md">Add Update</Button>
+            <Button 
+              variant="outline" 
+              onClick={handleRefreshProfile}
+              disabled={isRefreshingProfile}
+              className="px-6 py-2.5 rounded-full font-bold flex items-center gap-2 border-primary/30 text-primary hover:bg-primary/5"
+            >
+              {isRefreshingProfile ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Refresh AI Profile
+            </Button>
+            <Dialog open={isAddingUpdate} onOpenChange={setIsAddingUpdate}>
+              <DialogTrigger render={
+                <Button className="organic-gradient px-6 py-2.5 text-white font-bold rounded-full shadow-md">Add Update</Button>
+              } />
+              <DialogContent className="max-w-md rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden">
+                <div className="organic-gradient p-6 text-white">
+                  <DialogHeader>
+                    <DialogTitle className="text-2xl font-black">Log Care Event</DialogTitle>
+                    <p className="text-green-50/80 text-sm mt-1">Record a manual care activity for this specimen.</p>
+                  </DialogHeader>
+                </div>
+                <div className="p-6 bg-white space-y-4">
+                  <div className="space-y-2">
+                    <Label className="font-bold">Event Type</Label>
+                    <Select value={updateType} onValueChange={setUpdateType}>
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="watering">Watering</SelectItem>
+                        <SelectItem value="fertilizing">Fertilizing</SelectItem>
+                        <SelectItem value="repotting">Repotting</SelectItem>
+                        <SelectItem value="pruning">Pruning</SelectItem>
+                        <SelectItem value="milestone">Milestone</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-bold">Date of Event</Label>
+                    <Input 
+                      type="date" 
+                      value={updateDate} 
+                      onChange={e => setUpdateDate(e.target.value)}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-bold">Notes (Optional)</Label>
+                    <Textarea 
+                      placeholder="Add any specific details..." 
+                      value={updateNotes}
+                      onChange={e => setUpdateNotes(e.target.value)}
+                      className="rounded-xl min-h-[80px]"
+                    />
+                  </div>
+                  <Button onClick={handleAddUpdate} className="w-full organic-gradient h-12 rounded-xl text-white font-bold shadow-lg">
+                    Save Event
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </section>
@@ -1144,39 +1885,111 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
         </div>
       </div>
 
+      {/* Vitality & Growth Chart */}
+      <section className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-green-900/5">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h3 className="text-2xl font-black text-green-900">Vitality & Growth</h3>
+            <p className="text-sm text-green-800/60 font-medium">Health index development since plantation</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-full bg-primary"></div>
+              <span className="text-xs font-bold text-green-900">Health Index</span>
+            </div>
+          </div>
+        </div>
+        <div className="h-80 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={calculateHealthHistory(events, plant.plantationDate)}>
+              <defs>
+                <linearGradient id="colorHealth" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#166534" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#166534" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+              <XAxis 
+                dataKey="date" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 10, fill: '#888' }}
+                minTickGap={30}
+              />
+              <YAxis 
+                domain={[0, 100]} 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 10, fill: '#888' }} 
+              />
+              <Tooltip 
+                contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                labelStyle={{ fontWeight: 'bold', color: '#166534' }}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="health" 
+                stroke="#166534" 
+                strokeWidth={4} 
+                fillOpacity={1} 
+                fill="url(#colorHealth)" 
+                animationDuration={1500}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
       {/* Bento Grid: Care Requirements & AI Insights */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Care Requirements */}
         <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-4">
-          <div className="bg-surface-container-lowest p-6 rounded-lg space-y-3">
-            <Droplets className="h-6 w-6 text-blue-500" />
-            <h4 className="font-bold text-sm">Water</h4>
-            <p className="text-xs text-on-surface-variant">{plant.careRequirements?.wateringFrequency}</p>
+          <div className="bg-surface-container-lowest p-6 rounded-lg border border-outline-variant/30 hover:border-primary/30 transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <Droplets className="h-5 w-5 text-blue-500" />
+              <h4 className="font-bold text-sm">Watering</h4>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium">{formatCareValue(plant.careRequirements?.wateringFrequency)}</p>
           </div>
-          <div className="bg-surface-container-lowest p-6 rounded-lg space-y-3">
-            <Sun className="h-6 w-6 text-orange-400" />
-            <h4 className="font-bold text-sm">Sunlight</h4>
-            <p className="text-xs text-on-surface-variant">{plant.careRequirements?.sunlightRequirement}</p>
+          
+          <div className="bg-surface-container-lowest p-6 rounded-lg border border-outline-variant/30 hover:border-primary/30 transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <Sun className="h-5 w-5 text-orange-400" />
+              <h4 className="font-bold text-sm">Sunlight</h4>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium">{formatCareValue(plant.careRequirements?.sunlightRequirement)}</p>
           </div>
-          <div className="bg-surface-container-lowest p-6 rounded-lg space-y-3">
-            <Thermometer className="h-6 w-6 text-red-400" />
-            <h4 className="font-bold text-sm">Temperature</h4>
-            <p className="text-xs text-on-surface-variant">{plant.careRequirements?.idealTemperatureRange}</p>
+
+          <div className="bg-surface-container-lowest p-6 rounded-lg border border-outline-variant/30 hover:border-primary/30 transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <Thermometer className="h-5 w-5 text-red-400" />
+              <h4 className="font-bold text-sm">Temperature</h4>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium">{formatCareValue(plant.careRequirements?.idealTemperatureRange)}</p>
           </div>
-          <div className="bg-surface-container-lowest p-6 rounded-lg space-y-3">
-            <Wind className="h-6 w-6 text-cyan-400" />
-            <h4 className="font-bold text-sm">Humidity</h4>
-            <p className="text-xs text-on-surface-variant">{plant.careRequirements?.humidityRequirement}</p>
+
+          <div className="bg-surface-container-lowest p-6 rounded-lg border border-outline-variant/30 hover:border-primary/30 transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <CloudRain className="h-5 w-5 text-cyan-400" />
+              <h4 className="font-bold text-sm">Humidity</h4>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium">{formatCareValue(plant.careRequirements?.humidityRequirement)}</p>
           </div>
-          <div className="bg-surface-container-lowest p-6 rounded-lg space-y-3">
-            <Leaf className="h-6 w-6 text-amber-700" />
-            <h4 className="font-bold text-sm">Soil</h4>
-            <p className="text-xs text-on-surface-variant">{plant.careRequirements?.soilType}</p>
+
+          <div className="bg-surface-container-lowest p-6 rounded-lg border border-outline-variant/30 hover:border-primary/30 transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <Sprout className="h-5 w-5 text-green-600" />
+              <h4 className="font-bold text-sm">Soil Type</h4>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium">{formatCareValue(plant.careRequirements?.soilType)}</p>
           </div>
-          <div className="bg-surface-container-lowest p-6 rounded-lg space-y-3">
-            <RefreshCw className="h-6 w-6 text-purple-400" />
-            <h4 className="font-bold text-sm">Repotting</h4>
-            <p className="text-xs text-on-surface-variant">{plant.careRequirements?.repottingFrequency}</p>
+
+          <div className="bg-surface-container-lowest p-6 rounded-lg border border-outline-variant/30 hover:border-primary/30 transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <RefreshCw className="h-5 w-5 text-purple-400" />
+              <h4 className="font-bold text-sm">Repotting</h4>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium">{formatCareValue(plant.careRequirements?.repottingFrequency)}</p>
           </div>
         </div>
 
@@ -1193,12 +2006,204 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
               <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
               <p className="text-sm text-on-primary-container">{(plant as any).futurePredictions?.riskAlerts || "No immediate risks detected."}</p>
             </div>
+            <div className="flex gap-3">
+              <Lightbulb className="h-5 w-5 text-amber-500 shrink-0" />
+              <div className="space-y-1">
+                <p className="text-[10px] font-black text-primary uppercase tracking-widest">Smart Care Tip</p>
+                <p className="text-sm text-on-primary-container">{(plant as any).futurePredictions?.seasonalTips || "AI is preparing seasonal care tips..."}</p>
+              </div>
+            </div>
           </div>
-          <button className="mt-6 text-primary font-bold text-sm flex items-center gap-2">
-            View Detail Report <ArrowRight className="h-4 w-4" />
-          </button>
+          <Dialog open={isReportOpen} onOpenChange={setIsReportOpen}>
+            <DialogTrigger render={
+              <button className="mt-6 text-primary font-bold text-sm flex items-center gap-2 hover:translate-x-1 transition-transform">
+                View Detail Report <ArrowRight className="h-4 w-4" />
+              </button>
+            } />
+            <DialogContent className="max-w-3xl rounded-[2.5rem] border-none shadow-2xl p-0 overflow-hidden">
+              <div className="organic-gradient p-8 text-white relative">
+                <DialogHeader>
+                  <DialogTitle className="text-3xl font-black flex items-center gap-3">
+                    <Brain className="h-8 w-8" />
+                    AI Botanical Report
+                  </DialogTitle>
+                  <p className="text-green-50/80 font-medium mt-2">Comprehensive lifetime analysis and future roadmap for {plant.name}.</p>
+                </DialogHeader>
+                <div className="absolute top-0 right-0 p-8 opacity-10">
+                  <Leaf className="h-32 w-32 rotate-12" />
+                </div>
+              </div>
+              
+              <div className="p-8 bg-white max-h-[70vh] overflow-y-auto custom-scrollbar">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Lifespan & Health */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-xs">
+                      <Activity className="h-4 w-4" />
+                      Vitality Overview
+                    </div>
+                    <div className="bg-slate-50 p-5 rounded-2xl space-y-3">
+                      <div>
+                        <Label className="text-[10px] font-black text-slate-400 uppercase">Expected Lifespan</Label>
+                        <p className="font-bold text-slate-800">{plant.expectedLifespan || "Calculating..."}</p>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] font-black text-slate-400 uppercase">Current AI Status</Label>
+                        <p className="font-bold text-slate-800">{plant.healthStatus || "Analyzing..."}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Growth Predictions */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-xs">
+                      <TrendingUp className="h-4 w-4" />
+                      Growth Expectations
+                    </div>
+                    <div className="bg-slate-50 p-5 rounded-2xl">
+                      <p className="text-sm text-slate-600 leading-relaxed">
+                        {plant.futurePredictions?.growthExpectations || "AI is modeling growth patterns based on current care and environment."}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Seasonal Roadmap */}
+                  <div className="md:col-span-2 space-y-4">
+                    <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-xs">
+                      <Calendar className="h-4 w-4" />
+                      Seasonal Care Roadmap
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="bg-green-50/50 p-4 rounded-2xl border border-green-100">
+                        <h5 className="font-black text-green-800 text-[10px] uppercase mb-2">Spring & Summer</h5>
+                        <p className="text-xs text-slate-600 leading-relaxed">{plant.fertilizerSchedule?.seasonalSchedule?.springSummer || "Standard growth care."}</p>
+                      </div>
+                      <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100">
+                        <h5 className="font-black text-blue-800 text-[10px] uppercase mb-2">Monsoon</h5>
+                        <p className="text-xs text-slate-600 leading-relaxed">{plant.fertilizerSchedule?.seasonalSchedule?.monsoon || "Humidity management."}</p>
+                      </div>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                        <h5 className="font-black text-slate-800 text-[10px] uppercase mb-2">Winter</h5>
+                        <p className="text-xs text-slate-600 leading-relaxed">{plant.fertilizerSchedule?.seasonalSchedule?.winter || "Dormancy care."}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Future Milestones */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-xs">
+                      <History className="h-4 w-4" />
+                      Future Milestones
+                    </div>
+                    <div className="bg-slate-50 p-5 rounded-2xl space-y-4">
+                      <div className="flex gap-3">
+                        <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shrink-0 shadow-sm">
+                          <Package className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase">Next Repotting</p>
+                          <p className="text-sm font-bold text-slate-800">{plant.futurePredictions?.nextRepotting || "TBD"}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shrink-0 shadow-sm">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase">Seasonal Tip</p>
+                          <p className="text-sm font-bold text-slate-800">{plant.futurePredictions?.seasonalTips || "Keep environment stable."}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Risk Analysis */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-red-600 font-black uppercase tracking-widest text-xs">
+                      <AlertTriangle className="h-4 w-4" />
+                      Risk Analysis
+                    </div>
+                    <div className="bg-red-50/50 p-5 rounded-2xl border border-red-100">
+                      <p className="text-sm text-red-800 leading-relaxed font-medium">
+                        {plant.futurePredictions?.riskAlerts || "No immediate risks detected. Continue current care routine."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-8 p-6 bg-primary/5 rounded-[2rem] border border-primary/10">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center">
+                      <Lightbulb className="h-5 w-5" />
+                    </div>
+                    <h4 className="font-black text-slate-800">Expert Guidance</h4>
+                  </div>
+                  <p className="text-sm text-slate-600 leading-relaxed italic">
+                    "This report is generated using advanced botanical modeling. For the best results, ensure your manual logs (watering, fertilizing) are kept up to date, as the AI uses this history to refine its predictions."
+                  </p>
+                </div>
+              </div>
+              
+              <div className="p-6 bg-slate-50 flex justify-end">
+                <Button onClick={() => setIsReportOpen(false)} className="organic-gradient text-white font-bold rounded-full px-8">
+                  Close Report
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </section>
       </div>
+
+      {/* Smart Care Tips Section */}
+      {plant.smartCareTips && plant.smartCareTips.length > 0 && (
+        <section className="bg-white rounded-3xl p-8 shadow-xl shadow-green-900/5 border border-green-100 overflow-hidden">
+          <button 
+            onClick={() => setIsTipsOpen(!isTipsOpen)}
+            className="w-full flex items-center justify-between group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <Lightbulb className="h-7 w-7" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-2xl font-black text-green-900">Smart Care Tips</h3>
+                <p className="text-sm text-green-800/60 font-medium">Expert botanical guidance for your {plant.species}</p>
+              </div>
+            </div>
+            <div className={`w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center transition-transform duration-300 ${isTipsOpen ? 'rotate-180' : ''}`}>
+              <ChevronDown className="h-5 w-5 text-slate-400" />
+            </div>
+          </button>
+          
+          <AnimatePresence>
+            {isTipsOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
+                  {plant.smartCareTips.map((tip, idx) => (
+                    <motion.div 
+                      key={idx}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                      className="flex gap-4 p-5 bg-slate-50/50 rounded-2xl border border-slate-100 group hover:border-primary/30 transition-all hover:shadow-md"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-white text-primary flex items-center justify-center font-black text-sm shrink-0 shadow-sm group-hover:bg-primary group-hover:text-white transition-colors">
+                        {idx + 1}
+                      </div>
+                      <p className="text-sm text-slate-700 font-medium leading-relaxed">{tip}</p>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
+      )}
 
       {/* Growth & Health Visualization */}
       <section className="bg-surface-container-lowest rounded-xl p-8">
@@ -1218,36 +2223,112 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
       {/* Fertilizer Timeline */}
       <section className="bg-surface-container-lowest rounded-xl p-8 overflow-x-auto">
         <div className="flex justify-between items-center mb-8">
-          <h3 className="text-xl font-bold">Fertilizer Timeline</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="text-xl font-bold">Fertilizer Timeline</h3>
+            <Dialog open={isEditingFertilizer} onOpenChange={setIsEditingFertilizer}>
+              <DialogTrigger render={
+                <Button variant="ghost" size="icon" onClick={openFertilizerDialog} className="h-8 w-8 rounded-full text-primary hover:bg-primary/10">
+                  <Edit className="h-4 w-4" />
+                </Button>
+              } />
+              <DialogContent className="max-w-md rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden">
+                <div className="organic-gradient p-6 text-white">
+                  <DialogHeader>
+                    <DialogTitle className="text-2xl font-black">Edit Fertilizer Schedule</DialogTitle>
+                    <p className="text-green-50/80 text-sm mt-1">Customize the fertilizer routine for this plant.</p>
+                  </DialogHeader>
+                </div>
+                <div className="p-6 bg-white space-y-4 max-h-[60vh] overflow-y-auto">
+                  <div className="space-y-2">
+                    <Label className="font-bold">Fertilizer Type</Label>
+                    <Input 
+                      placeholder="e.g. NPK 19-19-19, Organic Compost" 
+                      value={fertForm.fertilizerType} 
+                      onChange={e => setFertForm({...fertForm, fertilizerType: e.target.value})}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-bold">Spring & Summer Schedule</Label>
+                    <Textarea 
+                      placeholder="e.g. Every 15 days during active growth" 
+                      value={fertForm.springSummer} 
+                      onChange={e => setFertForm({...fertForm, springSummer: e.target.value})}
+                      className="rounded-xl min-h-[80px]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-bold">Monsoon Schedule</Label>
+                    <Textarea 
+                      placeholder="e.g. Reduce frequency, avoid waterlogging" 
+                      value={fertForm.monsoon} 
+                      onChange={e => setFertForm({...fertForm, monsoon: e.target.value})}
+                      className="rounded-xl min-h-[80px]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-bold">Winter Schedule</Label>
+                    <Textarea 
+                      placeholder="e.g. Once a month or stop during dormancy" 
+                      value={fertForm.winter} 
+                      onChange={e => setFertForm({...fertForm, winter: e.target.value})}
+                      className="rounded-xl min-h-[80px]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-bold">Quantity Guidance</Label>
+                    <Input 
+                      placeholder="e.g. 5g per liter of water" 
+                      value={fertForm.quantityGuidance} 
+                      onChange={e => setFertForm({...fertForm, quantityGuidance: e.target.value})}
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+                <div className="p-6 bg-slate-50 flex justify-end gap-3">
+                  <Button variant="ghost" onClick={() => setIsEditingFertilizer(false)} className="rounded-xl font-bold">Cancel</Button>
+                  <Button onClick={handleUpdateFertilizer} className="organic-gradient text-white font-bold rounded-xl px-8 shadow-lg">Save Schedule</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
           <div className="flex gap-2">
             <button className="p-2 hover:bg-surface-container rounded-full"><ChevronLeft className="h-5 w-5" /></button>
             <button className="p-2 hover:bg-surface-container rounded-full"><ChevronRight className="h-5 w-5" /></button>
           </div>
         </div>
         <div className="flex gap-6 min-w-max pb-4">
-          {/* Example Seasonal Events */}
+          {/* Seasonal Events */}
           <div className="w-64 bg-surface-container-low p-6 rounded-lg border-l-4 border-green-500">
             <div className="flex justify-between items-start mb-4">
               <span className="text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded uppercase">Spring/Summer</span>
               <span className="text-xs text-on-surface-variant font-medium">Active</span>
             </div>
-            <h4 className="font-bold mb-2">{plant.fertilizerSchedule?.fertilizerType}</h4>
-            <p className="text-xs text-on-surface-variant">{plant.fertilizerSchedule?.seasonalSchedule.springSummer}</p>
+            <h4 className="font-bold mb-2">{plant.fertilizerSchedule?.fertilizerType || "Not specified"}</h4>
+            <p className="text-xs text-on-surface-variant">{plant.fertilizerSchedule?.seasonalSchedule?.springSummer || "No specific instructions."}</p>
+          </div>
+          <div className="w-64 bg-surface-container-low p-6 rounded-lg border-l-4 border-blue-500">
+            <div className="flex justify-between items-start mb-4">
+              <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded uppercase">Monsoon</span>
+              <span className="text-xs text-on-surface-variant font-medium">Rainy</span>
+            </div>
+            <h4 className="font-bold mb-2">{plant.fertilizerSchedule?.fertilizerType || "Not specified"}</h4>
+            <p className="text-xs text-on-surface-variant">{plant.fertilizerSchedule?.seasonalSchedule?.monsoon || "No specific instructions."}</p>
           </div>
           <div className="w-64 bg-surface-container-low p-6 rounded-lg border-l-4 border-amber-500">
             <div className="flex justify-between items-start mb-4">
               <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded uppercase">Winter</span>
               <span className="text-xs text-on-surface-variant font-medium">Dormant</span>
             </div>
-            <h4 className="font-bold mb-2">{plant.fertilizerSchedule?.fertilizerType}</h4>
-            <p className="text-xs text-on-surface-variant">{plant.fertilizerSchedule?.seasonalSchedule.winter}</p>
+            <h4 className="font-bold mb-2">{plant.fertilizerSchedule?.fertilizerType || "Not specified"}</h4>
+            <p className="text-xs text-on-surface-variant">{plant.fertilizerSchedule?.seasonalSchedule?.winter || "No specific instructions."}</p>
           </div>
           <div className="w-64 bg-surface-container p-6 rounded-lg border-l-4 border-slate-300">
             <div className="flex justify-between items-start mb-4">
               <span className="text-xs font-bold text-on-surface-variant bg-surface-container-highest px-2 py-0.5 rounded uppercase">Guidance</span>
             </div>
             <h4 className="font-bold mb-2">Quantity</h4>
-            <p className="text-xs text-slate-500">{plant.fertilizerSchedule?.quantityGuidance}</p>
+            <p className="text-xs text-slate-500">{plant.fertilizerSchedule?.quantityGuidance || "No specific guidance."}</p>
           </div>
         </div>
       </section>
@@ -1266,7 +2347,7 @@ const PlantDashboard = ({ plant, events, onUpdateEvent, onAddEvent, setIsChatOpe
                    <Scissors className="h-6 w-6 text-primary" />}
                   <div>
                     <h4 className="font-bold text-sm capitalize">{event.type}</h4>
-                    <p className="text-xs text-on-surface-variant">Due {format(new Date(event.date), 'MMM dd')}</p>
+                    <p className="text-xs text-on-surface-variant">Due {safeFormat(event.date, 'MMM dd')}</p>
                   </div>
                 </div>
                 <input 
@@ -1412,11 +2493,26 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('conservatory');
   const [farmerLogs, setFarmerLogs] = useState<FarmerLog[]>([]);
+  const [lands, setLands] = useState<Land[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [allEvents, setAllEvents] = useState<PlantEvent[]>([]);
+  const [notifiedEvents, setNotifiedEvents] = useState<Set<string>>(new Set());
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<{role: 'user' | 'model', parts: {text: string}[]}[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const handleUpdateProfile = async (data: Partial<UserProfile>) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), data);
+      toast.success("Profile updated successfully!");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to update profile.");
+    }
+  };
 
   const handleGlobalChat = async () => {
     if (!chatInput.trim()) return;
@@ -1464,6 +2560,50 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    if (!user) {
+      setUserProfile(null);
+      return;
+    }
+
+    const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (snapshot) => {
+      if (snapshot.exists()) {
+        setUserProfile({ uid: snapshot.id, ...snapshot.data() } as UserProfile);
+      } else {
+        const initialProfile: UserProfile = {
+          uid: user.uid,
+          email: user.email || '',
+          displayName: user.displayName || 'Farmer',
+          createdAt: new Date().toISOString()
+        };
+        setDoc(doc(db, 'users', user.uid), initialProfile);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || plants.length === 0) {
+      setAllEvents([]);
+      return;
+    }
+
+    const q = query(collectionGroup(db, 'events'), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const eList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlantEvent));
+      const plantIds = new Set(plants.map(p => p.id));
+      const filteredEvents = eList.filter(e => plantIds.has(e.plantId));
+      setAllEvents(filteredEvents);
+    }, (error) => {
+      console.error("CollectionGroup query failed:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user, plants]);
+
+  useEffect(() => {
     if (!selectedPlantId) {
       setEvents([]);
       return;
@@ -1497,6 +2637,62 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
+  useEffect(() => {
+    if (!user) {
+      setLands([]);
+      return;
+    }
+
+    const q = query(collection(db, 'lands'), where('ownerUid', '==', user.uid), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const lList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Land));
+      setLands(lList);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'lands');
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user || plants.length === 0) return;
+
+    // Check for due tasks in the current selected plant's events
+    const now = new Date();
+    const dueEvents = events.filter(e => 
+      e.status === 'pending' && 
+      e.type === 'watering' && 
+      new Date(e.date) <= now &&
+      !notifiedEvents.has(e.id)
+    );
+
+    if (dueEvents.length > 0) {
+      const plant = plants.find(p => p.id === selectedPlantId);
+      if (plant?.notificationsEnabled) {
+        dueEvents.forEach(event => {
+          // Always show toast
+          toast.info(`Time to water ${plant.name}!`, {
+            description: `Your ${plant.species} needs some hydration.`,
+          });
+
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification(`Time to water ${plant.name}!`, {
+              body: `Your ${plant.species} needs some hydration.`,
+              icon: plant.imageUrl || '/logo192.png'
+            });
+          }
+          setNotifiedEvents(prev => new Set(prev).add(event.id));
+        });
+      }
+    }
+  }, [user, plants, events, selectedPlantId, notifiedEvents]);
+
   const handleSignIn = async () => {
     const provider = new GoogleAuthProvider();
     try {
@@ -1518,6 +2714,32 @@ export default function App() {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'farmer_logs');
+    }
+  };
+
+  const handleAddLand = async (data: any) => {
+    if (!user) return;
+    try {
+      await addDoc(collection(db, 'lands'), {
+        ...data,
+        ownerUid: user.uid,
+        createdAt: new Date().toISOString()
+      });
+      toast.success("Land registered successfully!");
+    } catch (error) {
+      console.error(error);
+      handleFirestoreError(error, OperationType.WRITE, 'lands');
+    }
+  };
+
+  const handleDeleteLand = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this land?")) return;
+    try {
+      await deleteDoc(doc(db, 'lands', id));
+      toast.success("Land deleted.");
+    } catch (error) {
+      console.error(error);
+      handleFirestoreError(error, OperationType.DELETE, `lands/${id}`);
     }
   };
 
@@ -1547,7 +2769,8 @@ export default function App() {
       const docRef = await addDoc(collection(db, 'plants'), plantData);
       
       // 3. Generate Initial Events (Watering, Fertilizing)
-      const nextWatering = addDays(new Date(), 3); // Default
+      const wateringDays = getFrequencyInDays(aiProfile.careRequirements?.wateringFrequency);
+      const nextWatering = addDays(new Date(), wateringDays);
       try {
         await addDoc(collection(db, `plants/${docRef.id}/events`), {
           plantId: docRef.id,
@@ -1579,8 +2802,17 @@ export default function App() {
       // If completed, schedule next
       if (status === 'completed') {
         const event = events.find(e => e.id === eventId);
-        if (event && (event.type === 'watering' || event.type === 'fertilizing')) {
-          const nextDate = addDays(new Date(), event.type === 'watering' ? 7 : 30);
+        const plant = plants.find(p => p.id === selectedPlantId);
+        
+        if (event && plant && (event.type === 'watering' || event.type === 'fertilizing')) {
+          let daysToAdd = 7;
+          if (event.type === 'watering') {
+            daysToAdd = getFrequencyInDays(plant.careRequirements?.wateringFrequency);
+          } else {
+            daysToAdd = 30; // Default for fertilizing
+          }
+          
+          const nextDate = addDays(new Date(), daysToAdd);
           try {
             await addDoc(collection(db, `plants/${selectedPlantId}/events`), {
               plantId: selectedPlantId,
@@ -1600,13 +2832,13 @@ export default function App() {
     }
   };
 
-  const handleAddCustomEvent = async (type: string, notes: string) => {
+  const handleAddCustomEvent = async (type: string, notes: string, date: string = new Date().toISOString()) => {
     if (!selectedPlantId) return;
     try {
       await addDoc(collection(db, `plants/${selectedPlantId}/events`), {
         plantId: selectedPlantId,
         type,
-        date: new Date().toISOString(),
+        date,
         status: 'completed',
         notes
       });
@@ -1627,6 +2859,33 @@ export default function App() {
     }
   };
 
+  const handleTestNotification = () => {
+    toast.success('Notification System Working!', {
+      description: 'This is a test notification from your Conservatory.',
+      action: {
+        label: 'Dismiss',
+        onClick: () => console.log('Dismissed'),
+      },
+    });
+
+    if ("Notification" in window) {
+      if (Notification.permission === "granted") {
+        new Notification("Test Notification", {
+          body: "Browser notifications are enabled and working!",
+          icon: "/logo192.png"
+        });
+      } else if (Notification.permission !== "denied") {
+        Notification.requestPermission().then(permission => {
+          if (permission === "granted") {
+            new Notification("Notifications Enabled!", {
+              body: "You will now receive care alerts for your plants.",
+            });
+          }
+        });
+      }
+    }
+  };
+
   if (!isAuthReady) {
     return (
       <div className="flex h-screen items-center justify-center bg-surface">
@@ -1643,7 +2902,8 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen bg-surface">
-        <Navbar user={null} onSignOut={() => {}} />
+        <Toaster position="top-right" richColors />
+        <Navbar user={null} profile={null} onSignOut={() => {}} />
         <main className="container mx-auto flex flex-col items-center justify-center px-4 py-20 text-center">
           <motion.div 
             initial={{ opacity: 0, scale: 0.9 }}
@@ -1724,7 +2984,8 @@ export default function App() {
 
         // Group plants by plantation month
         const plantationData = plants.reduce((acc: any[], plant) => {
-          const month = format(new Date(plant.plantationDate), 'MMM yyyy');
+          if (!isValidDate(plant.plantationDate)) return acc;
+          const month = safeFormat(plant.plantationDate, 'MMM yyyy');
           const existing = acc.find(d => d.month === month);
           if (existing) {
             existing.count += 1;
@@ -1732,7 +2993,11 @@ export default function App() {
             acc.push({ month, count: 1 });
           }
           return acc;
-        }, []).sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime());
+        }, []).sort((a, b) => {
+          const dateA = new Date(a.month).getTime();
+          const dateB = new Date(b.month).getTime();
+          return dateA - dateB;
+        });
 
         return (
           <motion.div
@@ -1791,14 +3056,45 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* Vitality Leaderboard */}
+            <div className="bg-white p-8 rounded-3xl shadow-xl shadow-green-900/5">
+              <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+                <Trophy className="h-5 w-5 text-amber-500" />
+                Specimen Vitality Leaderboard
+              </h3>
+              <div className="space-y-4">
+                {plants
+                  .map(p => ({
+                    ...p,
+                    health: calculateHealth(allEvents.filter(e => e.plantId === p.id))
+                  }))
+                  .sort((a, b) => b.health - a.health)
+                  .slice(0, 5)
+                  .map((p, idx) => (
+                    <div key={p.id} className="flex items-center gap-4 p-3 rounded-2xl hover:bg-slate-50 transition-colors">
+                      <div className="w-8 h-8 rounded-full bg-green-100 text-green-800 flex items-center justify-center font-bold text-sm">
+                        #{idx + 1}
+                      </div>
+                      <div className="w-10 h-10 rounded-full overflow-hidden shrink-0">
+                        <img src={p.imageUrl || `https://picsum.photos/seed/${p.species}/100/100`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-bold text-sm text-green-900">{p.name}</h4>
+                        <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">{p.species}</p>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-black text-green-700">{p.health}%</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vitality</div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
           </motion.div>
         );
       case 'schedule':
-        const allPending = plants.flatMap(p => {
-          // This is a simplified way to get pending tasks for all plants
-          // In a real app, we'd fetch all events or use a more efficient query
-          return []; // Placeholder for now as we don't have a global events fetch
-        });
+        const pendingEvents = allEvents.filter(e => e.status === 'pending').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         return (
           <motion.div
             key="schedule"
@@ -1807,13 +3103,69 @@ export default function App() {
             exit={{ opacity: 0, y: -20 }}
             className="max-w-6xl mx-auto space-y-8"
           >
-            <h2 className="text-4xl font-black text-green-900">Care Schedule</h2>
-            <div className="bg-white p-8 rounded-3xl shadow-xl shadow-green-900/5">
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Calendar className="h-16 w-16 text-green-100 mb-4" />
-                <h3 className="text-xl font-bold text-green-900">Master Calendar</h3>
-                <p className="text-green-800/60 mt-2">Select a plant from the conservatory to view its specific schedule.</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-4xl font-black text-green-900">Care Schedule</h2>
+                <p className="text-green-800/60 font-medium">You have {pendingEvents.length} tasks pending across all specimens</p>
               </div>
+              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm">
+                <Calendar className="h-4 w-4 text-primary" />
+                <span className="text-sm font-bold text-green-900">{format(new Date(), 'MMMM yyyy')}</span>
+              </div>
+            </div>
+
+            <div className="grid gap-6">
+              {pendingEvents.length > 0 ? (
+                pendingEvents.map((event) => {
+                  const plant = plants.find(p => p.id === event.plantId);
+                  return (
+                    <div key={event.id} className="bg-white p-6 rounded-3xl shadow-xl shadow-green-900/5 flex items-center gap-6 group hover:shadow-primary/5 transition-all">
+                      <div className={`h-16 w-16 rounded-2xl flex items-center justify-center ${
+                        event.type === 'watering' ? 'bg-blue-50 text-blue-500' :
+                        event.type === 'fertilizing' ? 'bg-amber-50 text-amber-500' :
+                        'bg-green-50 text-green-500'
+                      }`}>
+                        {event.type === 'watering' ? <Droplets className="h-8 w-8" /> :
+                         event.type === 'fertilizing' ? <Zap className="h-8 w-8" /> :
+                         <Sprout className="h-8 w-8" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-primary bg-primary/5 px-2 py-0.5 rounded">
+                            {event.type}
+                          </span>
+                          <span className="text-xs font-bold text-slate-400">•</span>
+                          <span className="text-xs font-bold text-slate-400">
+                            {format(new Date(event.date), 'EEEE, MMM dd')}
+                          </span>
+                        </div>
+                        <h3 className="text-xl font-black text-green-900">
+                          {plant?.name || "Unknown Plant"}
+                        </h3>
+                        <p className="text-sm text-green-800/60 font-medium">{event.notes || `Scheduled ${event.type} care`}</p>
+                      </div>
+                      <Button 
+                        onClick={() => {
+                          setSelectedPlantId(event.plantId);
+                          // The dashboard will show up and user can complete it there
+                          // Or we could add a direct complete button here
+                        }}
+                        className="rounded-full organic-gradient text-white font-bold px-6 shadow-lg"
+                      >
+                        Go to Dashboard
+                      </Button>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="bg-white p-12 rounded-3xl shadow-xl shadow-green-900/5 text-center">
+                  <div className="h-20 w-20 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <CheckCircle2 className="h-10 w-10 text-green-200" />
+                  </div>
+                  <h3 className="text-2xl font-black text-green-900">All caught up!</h3>
+                  <p className="text-green-800/60 mt-2 max-w-xs mx-auto">Your conservatory is in perfect condition. No pending tasks for now.</p>
+                </div>
+              )}
             </div>
           </motion.div>
         );
@@ -1833,34 +3185,35 @@ export default function App() {
             />
           </motion.div>
         );
-      case 'settings':
+      case 'planner':
         return (
           <motion.div
-            key="settings"
+            key="planner"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="max-w-6xl mx-auto space-y-8"
+            className="max-w-6xl mx-auto"
           >
-            <h2 className="text-4xl font-black text-green-900">Settings</h2>
-            <div className="bg-white p-8 rounded-3xl shadow-xl shadow-green-900/5 space-y-6">
-              <div className="flex items-center justify-between p-4 bg-surface rounded-xl">
-                <div>
-                  <h4 className="font-bold">Push Notifications</h4>
-                  <p className="text-sm text-gray-500">Get alerts for watering and fertilizing</p>
-                </div>
-                <div className="h-6 w-12 bg-primary rounded-full relative">
-                  <div className="absolute right-1 top-1 h-4 w-4 bg-white rounded-full"></div>
-                </div>
-              </div>
-              <div className="flex items-center justify-between p-4 bg-surface rounded-xl">
-                <div>
-                  <h4 className="font-bold">AI Intensity</h4>
-                  <p className="text-sm text-gray-500">Control how often AI suggests care changes</p>
-                </div>
-                <span className="font-bold text-primary">High</span>
-              </div>
-            </div>
+            <FarmPlanner 
+              lands={lands} 
+              onAddLand={handleAddLand} 
+              onDeleteLand={handleDeleteLand} 
+            />
+          </motion.div>
+        );
+      case 'profile':
+        return (
+          <motion.div
+            key="profile"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="max-w-6xl mx-auto"
+          >
+            <FarmerProfile 
+              profile={userProfile} 
+              onUpdate={handleUpdateProfile} 
+            />
           </motion.div>
         );
       default:
@@ -1910,44 +3263,11 @@ export default function App() {
             ) : plants.length > 0 ? (
               <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
                 {plants.map((plant) => (
-                  <motion.div
-                    key={plant.id}
-                    whileHover={{ y: -8 }}
-                    className="group cursor-pointer overflow-hidden rounded-3xl bg-surface-container-lowest shadow-2xl shadow-green-900/5 transition-all hover:shadow-primary/10"
-                    onClick={() => setSelectedPlantId(plant.id)}
-                  >
-                    <div className="relative h-64 overflow-hidden">
-                      <img 
-                        src={plant.imageUrl || `https://picsum.photos/seed/${plant.species}/600/400`} 
-                        alt={plant.name}
-                        className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                      <div className="absolute bottom-4 left-4 right-4 translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all">
-                        <Button className="w-full organic-gradient text-white font-bold rounded-full">View Profile</Button>
-                      </div>
-                    </div>
-                    <div className="p-6">
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-xl font-black text-green-900">{plant.name}</h3>
-                        <Badge className="bg-primary/10 text-primary border-none font-bold uppercase text-[10px] tracking-widest">
-                          {plant.healthStatus || "Healthy"}
-                        </Badge>
-                      </div>
-                      <p className="text-sm font-medium text-green-800/60 mb-4">{plant.species}</p>
-                      <div className="flex items-center gap-4 text-xs font-bold text-green-800/40 uppercase tracking-widest">
-                        <div className="flex items-center gap-1">
-                          <Droplets className="h-3 w-3" />
-                          {plant.careRequirements?.wateringFrequency.split(' ')[0]}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Sun className="h-3 w-3" />
-                          {plant.careRequirements?.sunlightRequirement.split(' ')[0]}
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
+                  <PlantCard 
+                    key={plant.id} 
+                    plant={plant} 
+                    onClick={() => setSelectedPlantId(plant.id)} 
+                  />
                 ))}
               </div>
             ) : (
@@ -1972,7 +3292,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-surface">
-      <Navbar user={user} onSignOut={handleSignOut} />
+      <Toaster position="top-right" richColors />
+      <Navbar user={user} profile={userProfile} onSignOut={handleSignOut} />
       
       <div className="flex pt-24">
         <Sidebar 
@@ -2008,6 +3329,13 @@ export default function App() {
           <span className="text-[10px] font-bold">Diary</span>
         </button>
         <button 
+          onClick={() => { setActiveTab('planner'); setSelectedPlantId(null); }}
+          className={`flex flex-col items-center gap-1 ${activeTab === 'planner' ? 'text-primary' : 'text-slate-400'}`}
+        >
+          <Brain className="h-5 w-5" />
+          <span className="text-[10px] font-bold">Planner</span>
+        </button>
+        <button 
           onClick={() => { setActiveTab('growth'); setSelectedPlantId(null); }}
           className={`flex flex-col items-center gap-1 ${activeTab === 'growth' ? 'text-primary' : 'text-slate-400'}`}
         >
@@ -2015,11 +3343,11 @@ export default function App() {
           <span className="text-[10px] font-bold">Growth</span>
         </button>
         <button 
-          onClick={() => { setActiveTab('settings'); setSelectedPlantId(null); }}
-          className={`flex flex-col items-center gap-1 ${activeTab === 'settings' ? 'text-primary' : 'text-slate-400'}`}
+          onClick={() => { setActiveTab('profile'); setSelectedPlantId(null); }}
+          className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-primary' : 'text-slate-400'}`}
         >
-          <Settings className="h-5 w-5" />
-          <span className="text-[10px] font-bold">Settings</span>
+          <UserIcon className="h-5 w-5" />
+          <span className="text-[10px] font-bold">Profile</span>
         </button>
       </div>
 

@@ -3,9 +3,20 @@ import { Plant, PlantEvent, FarmerLog } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
+const cleanJson = (text: string) => {
+  try {
+    // Remove markdown code blocks if present
+    const cleaned = text.replace(/```json\n?|```/g, '').trim();
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("Failed to parse AI response as JSON:", text);
+    throw new Error("Invalid AI response format");
+  }
+};
+
 export const generatePlantProfile = async (plant: Partial<Plant>) => {
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-1.5-flash",
     contents: `Generate a comprehensive lifetime profile for this plant:
       Name: ${plant.name}
       Species: ${plant.species}
@@ -18,7 +29,8 @@ export const generatePlantProfile = async (plant: Partial<Plant>) => {
       3. Short description and basic characteristics.
       4. Full care guide (watering, sunlight, temperature, humidity, soil, repotting).
       5. Lifetime fertilizer schedule (type, seasonal guidance, quantity).
-      6. Growth expectations and next repotting prediction.`,
+      6. Growth expectations and next repotting prediction.
+      7. 3-5 specific "Smart Care Tips" for this specimen (e.g., pruning techniques, pest prevention, leaf cleaning).`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -27,6 +39,10 @@ export const generatePlantProfile = async (plant: Partial<Plant>) => {
           expectedLifespan: { type: Type.STRING },
           healthStatus: { type: Type.STRING },
           description: { type: Type.STRING },
+          smartCareTips: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          },
           careRequirements: {
             type: Type.OBJECT,
             properties: {
@@ -67,17 +83,17 @@ export const generatePlantProfile = async (plant: Partial<Plant>) => {
             required: ["nextRepotting", "seasonalTips", "growthExpectations", "riskAlerts"]
           }
         },
-        required: ["expectedLifespan", "healthStatus", "description", "careRequirements", "fertilizerSchedule", "futurePredictions"]
+        required: ["expectedLifespan", "healthStatus", "description", "smartCareTips", "careRequirements", "fertilizerSchedule", "futurePredictions"]
       }
     }
   });
 
-  return JSON.parse(response.text);
+  return cleanJson(response.text);
 };
 
 export const diagnosePlantIssue = async (plant: Plant, issue: string) => {
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-1.5-flash",
     contents: `Diagnose a health issue for this plant:
       Plant: ${plant.name} (${plant.species})
       Location: ${plant.location}
@@ -97,7 +113,7 @@ export const diagnosePlantIssue = async (plant: Plant, issue: string) => {
     }
   });
 
-  return JSON.parse(response.text);
+  return cleanJson(response.text);
 };
 
 export const chatExpert = async (history: {role: 'user' | 'model', parts: {text: string}[]}[], message: string, plantContext?: {plant: Plant, events: PlantEvent[]}) => {
@@ -113,7 +129,7 @@ export const chatExpert = async (history: {role: 'user' | 'model', parts: {text:
        If the user asks about a specific plant, ask for its species and symptoms if applicable.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-1.5-flash",
     contents: [...history, { role: 'user', parts: [{ text: message }] }],
     config: {
       systemInstruction
@@ -125,7 +141,7 @@ export const chatExpert = async (history: {role: 'user' | 'model', parts: {text:
 
 export const generateFarmerInsights = async (logs: FarmerLog[]) => {
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-1.5-flash",
     contents: `Analyze these farming logs and provide insights:
       Logs: ${JSON.stringify(logs.slice(0, 20))}
       
@@ -149,5 +165,53 @@ export const generateFarmerInsights = async (logs: FarmerLog[]) => {
     }
   });
 
-  return JSON.parse(response.text);
+  return cleanJson(response.text);
+};
+
+export const generateLandReport = async (land: { area: string, areaUnit: string, cropType: string, treesPlanted?: string, soilType?: string, location?: string }) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-1.5-flash",
+    contents: `Generate a future farming roadmap and care solution for this land:
+      Area: ${land.area} ${land.areaUnit}
+      Main Crop: ${land.cropType}
+      Trees/Plants already planted: ${land.treesPlanted || 'Not specified'}
+      Soil Type: ${land.soilType || 'Not specified'}
+      Location: ${land.location || 'Not specified'}
+      
+      Provide:
+      1. Future watering schedule and needs.
+      2. Fertilizer requirements (types and timing).
+      3. Potential pest alerts and prevention.
+      4. Harvest timeline prediction.
+      5. General strategic advice.
+      6. A step-by-step roadmap for the next 12 months.`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          wateringSchedule: { type: Type.STRING },
+          fertilizerNeeds: { type: Type.STRING },
+          pestAlerts: { type: Type.STRING },
+          harvestPrediction: { type: Type.STRING },
+          generalAdvice: { type: Type.STRING },
+          roadmap: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                month: { type: Type.STRING },
+                action: { type: Type.STRING },
+                details: { type: Type.STRING }
+              },
+              required: ["month", "action", "details"]
+            }
+          }
+        },
+        required: ["wateringSchedule", "fertilizerNeeds", "pestAlerts", "harvestPrediction", "generalAdvice", "roadmap"]
+      }
+    }
+  });
+
+  return cleanJson(response.text);
 };

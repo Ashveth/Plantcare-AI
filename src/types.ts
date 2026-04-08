@@ -11,10 +11,19 @@ export interface Plant {
   expectedLifespan?: string;
   healthStatus?: string;
   description?: string;
+  smartCareTips?: string[];
   careRequirements?: CareRequirements;
   fertilizerSchedule?: FertilizerSchedule;
+  futurePredictions?: FuturePredictions;
   notificationsEnabled?: boolean;
   createdAt: string;
+}
+
+export interface FuturePredictions {
+  nextRepotting: string;
+  seasonalTips: string;
+  growthExpectations: string;
+  riskAlerts: string;
 }
 
 export interface CareRequirements {
@@ -51,6 +60,35 @@ export interface UserProfile {
   uid: string;
   email: string;
   displayName?: string;
+  phone?: string;
+  farmName?: string;
+  location?: string;
+  bio?: string;
+  profileImageUrl?: string;
+  createdAt?: string;
+}
+
+export interface Land {
+  id: string;
+  ownerUid: string;
+  name: string;
+  area: string;
+  areaUnit: 'acres' | 'hectares' | 'sq_meters' | 'bigha';
+  cropType: string;
+  treesPlanted?: string;
+  soilType?: string;
+  location?: string;
+  aiReport?: LandAIReport;
+  createdAt: string;
+}
+
+export interface LandAIReport {
+  wateringSchedule: string;
+  fertilizerNeeds: string;
+  pestAlerts: string;
+  harvestPrediction: string;
+  generalAdvice: string;
+  roadmap: { month: string, action: string, details: string }[];
 }
 
 export interface FarmerLog {
